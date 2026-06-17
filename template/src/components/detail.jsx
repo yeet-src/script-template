@@ -12,7 +12,7 @@ export default ({ cpus, selected, rows }) => (
       {() => {
         const cpu = cpus.get()[selected.get()];
         const recent = cpu ? cpu.recent : [];
-        const n = Math.max(1, rows());
+        const n = Math.max(1, rows);
         if (!recent.length) return [<Text height="1">{fg(idx(240))("   (idle — no switches in window)")}</Text>];
         return recent.slice(0, n).map((s) => (
           <Text height="1" break="none">

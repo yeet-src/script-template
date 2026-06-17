@@ -18,10 +18,12 @@
  */
 import { Box, Text, fg, idx, mount, signal } from "yeet:tui";
 import { numCpus } from "@/probes/probe.js";
-import { cpus, minSlice, setMinSlice } from "@/probes/cpusched.js";
+import { cpus, minSlice, procs, setMinSlice } from "@/probes/cpusched.js";
 import { latency } from "@/probes/runqlat.js";
+import { layoutFor } from "@/lib/layout.js";
 import TitleBar from "@/components/titlebar.jsx";
 import Heatmap from "@/components/heatmap.jsx";
+import Procs from "@/components/procs.jsx";
 import Detail from "@/components/detail.jsx";
 import Histogram from "@/components/histogram.jsx";
 import Footer from "@/components/footer.jsx";
@@ -31,9 +33,6 @@ const HEAT_TOP = 2; // screen row of the first CPU row (title + heatmap header)
 
 const selected = signal(0);
 const move = (d) => selected.set(Math.max(0, Math.min(numCpus - 1, selected.get() + d)));
-
-// Detail feed length = whatever's left under the heatmap (one row per CPU).
-const detailRows = () => Math.max(3, tty.size().rows - numCpus - 5);
 
 tty.on("keydown", (e) => {
   const code = e.code;
@@ -55,19 +54,41 @@ tty.on?.("mousedown", (e) => {
 
 const Rule = () => <Text height="1">{fg(idx(238))("─".repeat(400))}</Text>;
 
-const Root = () => (
+// One layout cell → its component, filled with the extents the layout chose.
+const cell = (c) => {
+  switch (c.kind) {
+    case "heatmap":
+      return <Heatmap cpus={cpus} selected={selected} gridCols={c.gridCols} maxRows={c.maxRows} />;
+    case "procs":
+      return <Procs procs={procs} width={c.w} maxRows={c.maxRows} />;
+    case "detail":
+      return <Detail cpus={cpus} selected={selected} rows={c.rows} />;
+    case "histogram":
+      return <Histogram latency={latency} />;
+  }
+};
+
+// `view(size)` hands us the terminal's reactive size signal; reading it inside
+// this thunk reflows the whole structure on resize. The layout is the single
+// source of truth — wide builds the 2×2 grid, narrow stacks into one column,
+// dropping secondary panels when there isn't height for them.
+const Root = (size) => (
   <Box>
     <TitleBar cpus={cpus} minSlice={minSlice} />
-    <Heatmap cpus={cpus} selected={selected} />
-    <Rule />
-    <Box height="1fr" direction="row">
-      <Box width="1fr">
-        <Detail cpus={cpus} selected={selected} rows={detailRows} />
-      </Box>
-      <Box width="34">
-        <Histogram latency={latency} />
-      </Box>
-    </Box>
+    {() => {
+      const out = [];
+      layoutFor(size.get()).rows.forEach((row, i) => {
+        if (i) out.push(<Rule />);
+        out.push(
+          <Box height={`${row.h}`} direction="row">
+            {row.cells.map((c) => (
+              <Box width={`${c.w}`}>{cell(c)}</Box>
+            ))}
+          </Box>,
+        );
+      });
+      return out;
+    }}
     <Footer />
   </Box>
 );
