@@ -1,0 +1,9 @@
+# This repo holds only the template payload and the new script —
+# nothing is built here. Guard against stray artifacts if someone runs a
+# build inside template/ while editing it.
+template/node_modules/
+template/src/index.jsx
+template/.build/
+template/bin/*
+!template/bin/.gitkeep
+template/src/bpf/include/vmlinux.h

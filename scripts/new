@@ -1,0 +1,55 @@
+#!/bin/sh
+# Create a new yeet script from template/ into a destination directory.
+#
+#   scripts/new <dest-dir> [name]
+
+set -eu
+
+# Force the C locale so the [a-z0-9._-] range below means ASCII — under
+# some locales the collation order folds uppercase into [a-z].
+export LC_ALL=C
+
+# Resolve the template relative to this script (which lives in scripts/),
+# so it works from any working directory.
+SRC="$(cd "$(dirname "$0")/.." && pwd)/template"
+
+DEST="${1:-}"
+if [ -z "$DEST" ]; then
+	echo "usage: scripts/new <dest-dir> [name]" >&2
+	exit 1
+fi
+NAME="${2:-$(basename "$DEST")}"
+
+# npm package names: lowercase letters, digits, dash, underscore, dot.
+case "$NAME" in
+	*[!a-z0-9._-]*)
+		echo "error: invalid project name '$NAME' (use [a-z0-9._-])" >&2
+		exit 1
+		;;
+esac
+
+if [ ! -d "$SRC" ]; then
+	echo "error: template/ not found — nothing to copy" >&2
+	exit 1
+fi
+
+# Refuse to clobber an existing non-empty destination.
+if [ -d "$DEST" ] && [ -n "$(ls -A "$DEST" 2>/dev/null)" ]; then
+	echo "error: destination '$DEST' exists and is not empty" >&2
+	exit 1
+fi
+
+mkdir -p "$DEST"
+# Copy the payload (including dotfiles) into the destination.
+cp -R "$SRC/." "$DEST/"
+
+# Substitute __NAME__ in the files that carry it. Portable in-place edit
+# (BSD and GNU sed disagree on -i), so go through a temp file.
+for f in package.json package-lock.json README.md; do
+	[ -f "$DEST/$f" ] || continue
+	tmp="$DEST/$f.tmp.$$"
+	sed "s/__NAME__/$NAME/g" "$DEST/$f" >"$tmp"
+	mv "$tmp" "$DEST/$f"
+done
+
+echo "created '$NAME' in $DEST — cd there, run 'make', then 'yeet run .'"
