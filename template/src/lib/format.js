@@ -20,7 +20,13 @@ export const fmtDuration = (ns) => {
   return `${(ns / 1e9).toFixed(1)}s`;
 };
 
-// Cold -> hot color ramp for a 0..1 fraction (blue → green → amber → red).
-const RAMP = [17, 18, 19, 20, 26, 32, 38, 44, 49, 78, 154, 184, 214, 208, 202, 196].map(idx);
+// Cold -> hot "inferno" ramp for a 0..1 fraction: a near-black floor rising
+// through deep purple and magenta into orange, gold, and white-hot. It's the
+// matplotlib-style heatmap gradient, approximated in the xterm-256 cube, and
+// reads as genuinely thermal — quiet cores sit dark, hot ones glow white.
+// Index 0 is a visible charcoal so idle cells still show on screen.
+const RAMP = [
+  234, 17, 54, 55, 91, 127, 163, 199, 205, 203, 209, 215, 221, 227, 229, 231,
+].map(idx);
 export const heat = (frac) =>
   RAMP[Math.min(RAMP.length - 1, Math.max(0, Math.floor(frac * RAMP.length)))];
