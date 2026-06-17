@@ -2,10 +2,9 @@
 // and loaded once here; the per-feature probe modules (cpusched.js,
 // runqlat.js) import this `control` and attach their own maps to it. All
 // binds must happen before the single start(), so they live together here.
-import { BpfObject } from "yeet:bpf";
-
-// `base: import.meta.dirname` resolves against the running bundle.
-const probe = new BpfObject({ exe: "../bin/probe.bpf.o", base: import.meta.dirname });
+// `#/` resolves against the script root, so the import is stable regardless of
+// where the loading module sits in the bundle.
+import probe from "#/bin/probe.bpf.o";
 
 export const control = await probe
   .bind("events", { kind: "ring_buf", btf_struct: "sched_event" }) // cpusched stream
