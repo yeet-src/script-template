@@ -64,7 +64,7 @@ const cell = (c) => {
     case "detail":
       return <Detail cpus={cpus} selected={selected} rows={c.rows} />;
     case "histogram":
-      return <Histogram latency={latency} />;
+      return <Histogram latency={latency} maxRows={c.maxRows} />;
   }
 };
 
@@ -75,20 +75,25 @@ const cell = (c) => {
 const Root = (size) => (
   <Box>
     <TitleBar cpus={cpus} minSlice={minSlice} />
-    {() => {
-      const out = [];
-      layoutFor(size.get()).rows.forEach((row, i) => {
-        if (i) out.push(<Rule />);
-        out.push(
-          <Box height={`${row.h}`} direction="row">
-            {row.cells.map((c) => (
-              <Box width={`${c.w}`}>{cell(c)}</Box>
-            ))}
-          </Box>,
-        );
-      });
-      return out;
-    }}
+    {/* App shell: fixed title + footer, a flex body between. The 1fr body
+        absorbs any rounding so the footer is always pinned to the last row,
+        and overflow:hidden keeps an oversized panel from painting past it. */}
+    <Box height="1fr" overflow="hidden">
+      {() => {
+        const out = [];
+        layoutFor(size.get()).rows.forEach((row, i) => {
+          if (i) out.push(<Rule />);
+          out.push(
+            <Box height={`${row.h}`} direction="row" overflow="hidden">
+              {row.cells.map((c) => (
+                <Box width={`${c.w}`}>{cell(c)}</Box>
+              ))}
+            </Box>,
+          );
+        });
+        return out;
+      }}
+    </Box>
     <Footer />
   </Box>
 );
