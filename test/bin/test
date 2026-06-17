@@ -1,0 +1,2 @@
+#!/usr/bin/env bash
+exec yeet run "$(cd "$(dirname "$0")/.." && pwd)/src" "$@"
