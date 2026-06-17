@@ -72,26 +72,14 @@ the `@/` alias and leaving `yeet:*` builtins external.
 The data layer loads the object at runtime:
 
 ```js
-import probe from "#/bin/probe.bpf.o";
-import { RingBuf } from "yeet:bpf";
-
+const probe = new BpfObject({ exe: "../bin/probe.bpf.o", base: import.meta.dirname });
 const control = await probe
-  .bind("events", { kind: "ring_buf", btf_struct: "sched_event" })
+  .bind("events", { kind: "ringbuf", btf_struct: "sched_event" })
   .bind("probe.data", { kind: "data" })   // the .data section that holds the knob
   .start();                                // the tracepoint auto-attaches
-
-// Consume the ring buffer: one subscription, called per event.
-const events = new RingBuf(control, "events");
-const sub = events.subscribe((w) => {
-  const e = w?.sched_event ?? w; // unwrap the btf_struct
-  // ... handle e
-});
-// tear down when done: sub.then(_.unsubscribe())  (see probes/cpusched.js)
 ```
 
-The `.bpf.o` is importable directly (esbuild leaves `*.bpf.o` external); `#/`
-resolves against the script root (the `#/*` → `./*` alias in `tsconfig.json`),
-so it stays valid no matter where the loading module sits.
+`base: import.meta.dirname` resolves the path against the running bundle.
 `probe.data` is libbpf's name for this object's `.data` section (confirm with
 `bpftool btf dump file bin/probe.bpf.o` if you rename things).
 
