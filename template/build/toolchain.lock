@@ -1,6 +1,16 @@
 # Pinned versions for the vendored build toolchain. Sourced by the build
 # and fetch scripts and by CI so every arch is built from identical inputs.
 
+# Toolchain bundle version. Each publish is an immutable, version-tagged
+# release `v<TOOLCHAIN_VERSION>` holding the whole set; consumers pin this one
+# number, and the cache is keyed by it (cache/yeet/toolchain/v<N>/<arch>/). CI
+# bumps it by 0.1 on every publish (which only happens when build/ changes).
+TOOLCHAIN_VERSION=0.1
+
+# Where a consumer fetches assets from: the version-tagged release. The fetch
+# appends `/v<TOOLCHAIN_VERSION>/<tool>-<arch>`.
+TOOLCHAIN_BASE_URL=https://github.com/yeet-src/toolchain/releases/download
+
 # LLVM/clang — built fully-static from source (see Dockerfile.clang). clang is
 # the one tool we build rather than fetch, so consumers download the prebuilt
 # binary from our release assets; CI fills these checksums after building.
@@ -8,12 +18,6 @@
 LLVM_VERSION=22.1.8
 CLANG_SHA256_x86_64=440c6dbe473502e3d328fb155a3888bd3fdef7d81926afce048cd7e699c4aefa
 CLANG_SHA256_aarch64=105fb2d324095127a127bcba56702a86229ed8892ce6429802d30585fa270603
-
-# Where a consumer (`yeet build`) fetches the prebuilt clang asset from when
-# populating its local toolchain cache. Assets are version-addressed
-# (clang-<arch>-llvm<version>) on a stable "toolchain" release, so older pins
-# keep resolving their exact binary after a toolchain bump.
-TOOLCHAIN_BASE_URL=https://github.com/yeet-src/toolchain/releases/download/toolchain
 
 # bpftool — official static binary from libbpf/bpftool, re-hosted on our
 # "toolchain" release so the build fetches everything from one place. CI
