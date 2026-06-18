@@ -19,11 +19,15 @@
 
 UNAME_M := $(shell uname -m)
 
-# 1. In-repo committed binaries (bootstrap-repo development).
-VENDORED := $(firstword $(wildcard ../v/$(UNAME_M) ../../v/$(UNAME_M) v/$(UNAME_M)))
+# 1. In-repo binaries present under v/<arch>/ (a dev who built them locally).
+# Match the clang binary itself, not just the dir — the binaries are gitignored
+# (distributed via the cache), so a fresh clone has no v/<arch>/clang and falls
+# through to the cache below.
+VENDORED_CLANG := $(firstword $(wildcard ../v/$(UNAME_M)/clang ../../v/$(UNAME_M)/clang v/$(UNAME_M)/clang))
 
 TOOLCHAIN_LOCK :=
-ifneq ($(VENDORED),)
+ifneq ($(VENDORED_CLANG),)
+  VENDORED := $(patsubst %/clang,%,$(VENDORED_CLANG))
   CLANG   ?= $(VENDORED)/clang
   BPFTOOL ?= $(VENDORED)/bpftool
   ESBUILD ?= $(VENDORED)/esbuild
@@ -31,11 +35,14 @@ ifneq ($(VENDORED),)
   # shared across arches under v/include, version-tied to bpftool/libbpf.
   BPF_SYSINCLUDE ?= $(dir $(VENDORED))include
 else
-  # 2. Shared per-machine cache, keyed by the pinned toolchain version.
-  TOOLCHAIN_LOCK := $(firstword $(wildcard build/toolchain.lock))
+  # 2. Shared per-machine cache, keyed by the pinned toolchain version. A
+  # scaffolded project carries build/toolchain.lock; building the bootstrap
+  # repo itself falls back to the canonical pins one level up so it, too,
+  # needs no committed binaries.
+  TOOLCHAIN_LOCK := $(firstword $(wildcard build/toolchain.lock ../v/build/versions.env))
   ifneq ($(TOOLCHAIN_LOCK),)
     include $(TOOLCHAIN_LOCK)
-    TOOLCHAIN_KEY  := llvm$(LLVM_VERSION)-bpftool$(BPFTOOL_VERSION)-esbuild$(ESBUILD_VERSION)
+    TOOLCHAIN_KEY  := llvm$(LLVM_VERSION)-bpftool$(BPFTOOL_VERSION)-esbuild$(ESBUILD_VERSION)-make$(MAKE_VERSION)
     YEET_CACHE_DIR ?= $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/yeet
     TOOLCHAIN_DIR  := $(YEET_CACHE_DIR)/toolchain/$(TOOLCHAIN_KEY)/$(UNAME_M)
     CLANG   ?= $(TOOLCHAIN_DIR)/clang
