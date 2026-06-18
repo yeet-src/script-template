@@ -43,15 +43,8 @@ mkdir -p "$DEST"
 # Copy the payload (including dotfiles) into the destination.
 cp -R "$SRC/." "$DEST/"
 
-# Stamp the toolchain pin so the project builds against a fixed toolchain
-# version, resolved from the shared per-machine cache (build/toolchain.mk).
-# This is what keeps an existing project building against the exact clang/
-# bpftool/esbuild it was created with, regardless of later template changes.
-PINS="$(cd "$SRC/.." && pwd)/v/build/versions.env"
-if [ -f "$PINS" ]; then
-	mkdir -p "$DEST/build"
-	cp "$PINS" "$DEST/build/toolchain.lock"
-fi
+# The toolchain pin (build/toolchain.lock) ships in the template, so it is
+# copied along with everything else above — no stamping needed here.
 
 # Substitute __NAME__ in the files that carry it. Portable in-place edit
 # (BSD and GNU sed disagree on -i), so go through a temp file.

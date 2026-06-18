@@ -1,0 +1,50 @@
+# Pinned versions for the vendored build toolchain. Sourced by the build
+# and fetch scripts and by CI so every arch is built from identical inputs.
+
+# LLVM/clang — built fully-static from source (see Dockerfile.clang). clang is
+# the one tool we build rather than fetch, so consumers download the prebuilt
+# binary from our release assets; CI fills these checksums after building.
+# Empty until vendor.yml has published a build.
+LLVM_VERSION=22.1.8
+CLANG_SHA256_x86_64=440c6dbe473502e3d328fb155a3888bd3fdef7d81926afce048cd7e699c4aefa
+CLANG_SHA256_aarch64=105fb2d324095127a127bcba56702a86229ed8892ce6429802d30585fa270603
+
+# Where a consumer (`yeet build`) fetches the prebuilt clang asset from when
+# populating its local toolchain cache. Assets are version-addressed
+# (clang-<arch>-llvm<version>) on a stable "toolchain" release, so older pins
+# keep resolving their exact binary after a toolchain bump.
+TOOLCHAIN_BASE_URL=https://github.com/yeet-src/toolchain/releases/download/toolchain
+
+# bpftool — official static binary from libbpf/bpftool, re-hosted on our
+# "toolchain" release so the build fetches everything from one place. CI
+# records the binary checksum (consumers verify the binary, not the upstream
+# tarball). The matching libbpf program headers (v/include/bpf) ride the same
+# version; CI records the headers-tarball checksum too.
+BPFTOOL_VERSION=7.7.0
+BPFTOOL_SHA256_x86_64=74bd16335aa1c40714fb50287a42766c6faa4958f969cce32fef89485ce4934c
+BPFTOOL_SHA256_aarch64=2b3fc4dd5e4e40bd8d670c5f1fa9693b3f879a122c0f6a3eb806dfc6735da6b7
+LIBBPF_HEADERS_SHA256=f19af8beb34b8274890ca30821eccaced42083c2a923853a73e76cca9bbf4625
+
+# GNU make — the build driver. Built static from source (tiny, fast). Since
+# make can't fetch itself, `yeet build` bootstraps it into the cache at the
+# shell level before invoking it. CI records the per-arch checksums.
+MAKE_VERSION=4.4.1
+MAKE_SHA256_x86_64=a92853c409617e84c2460672955ddc6c9f40032257c24cf743b237c5c235995d
+MAKE_SHA256_aarch64=d5d5a80c7d57795d9f13c57ecd5315b9602327370094830d7fa9e490fa2137eb
+
+# git — used to `git init` a freshly generated project. Built static from
+# source, lean (NO_CURL/NO_OPENSSL): init/add/commit/local ops only, no https
+# remotes (host git or yeet's resolver handle those). CI records checksums.
+GIT_VERSION=2.54.0
+GIT_SHA256_x86_64=0e9dff2f8fc0d44fa67971c01c46ddba710d07a2911278f7f066abec422f24b6
+GIT_SHA256_aarch64=19c6dda22c811324649e6e4aa8c369a8d822463d61d794d0e23e72fb77b5376c
+
+# esbuild — official static (Go) binary from the @esbuild/<platform> npm
+# package, re-hosted on our "toolchain" release. CI records the binary
+# checksum. Keep ESBUILD_VERSION in sync with template/package.json.
+ESBUILD_VERSION=0.28.1
+ESBUILD_SHA256_x86_64=0c6588b092a2c291a72bab90659f3c9e0e25e0fe59c9ac12b4dae4d945e5548c
+ESBUILD_SHA256_aarch64=51e829ba36f36be6d9aea6e329ddc4f9350302339b16aaca96a3cb97f64a8ebb
+
+# Alpine base used for the musl-static clang build.
+ALPINE_TAG=alpine:3.21
