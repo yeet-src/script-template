@@ -1,0 +1,133 @@
+name: vendor-toolchain
+
+# Build the vendored static BPF toolchain (clang + bpftool) for both arches
+# and commit it into v/. clang is compiled from LLVM source on a NATIVE
+# runner per arch — no QEMU emulation — so the multi-hour x86_64 build that
+# is impractical on an arm64 laptop runs here in normal CI time.
+#
+# Run manually from the Actions tab, or when the build recipe changes.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - 'v/build/**'
+      - '.github/workflows/vendor.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vendor-toolchain
+  cancel-in-progress: false
+
+jobs:
+  clang:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: amd64
+            arch: x86_64
+            runner: ubuntu-latest
+          - platform: arm64
+            arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build static clang (${{ matrix.arch }})
+        run: |
+          set -euo pipefail
+          . v/build/versions.env
+          docker buildx build \
+            --platform "linux/${{ matrix.platform }}" \
+            -f v/build/Dockerfile.clang \
+            --build-arg "LLVM_VERSION=${LLVM_VERSION}" \
+            --build-arg "ALPINE_TAG=${ALPINE_TAG}" \
+            --build-arg "COMPILE_JOBS=$(nproc)" \
+            --target export \
+            --output "type=local,dest=out" \
+            v/build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clang-${{ matrix.arch }}
+          path: out/clang
+          if-no-files-found: error
+
+  vendor:
+    needs: clang
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Collect clang binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Assemble v/ tree
+        run: |
+          set -euo pipefail
+          install -Dm755 artifacts/clang-x86_64/clang  v/x86_64/clang
+          install -Dm755 artifacts/clang-aarch64/clang v/aarch64/clang
+          sh v/build/fetch-bpftool.sh
+          sh v/build/fetch-esbuild.sh
+          sh v/build/fetch-libbpf-headers.sh
+          ls -la v/x86_64 v/aarch64 v/include/bpf
+          file v/x86_64/* v/aarch64/* || true
+
+      - name: Build libbpf-headers tarball
+        run: |
+          set -euo pipefail
+          # Top-level bpf/ dir so a consumer extracts it as <include>/bpf/*.h.
+          tar -czf libbpf-headers.tar.gz -C v/include bpf
+
+      - name: Record checksums in versions.env
+        run: |
+          set -euo pipefail
+          for arch in x86_64 aarch64; do
+            sum="$(sha256sum "v/$arch/clang" | awk '{print $1}')"
+            sed -i "s|^CLANG_SHA256_${arch}=.*|CLANG_SHA256_${arch}=${sum}|" v/build/versions.env
+          done
+          hsum="$(sha256sum libbpf-headers.tar.gz | awk '{print $1}')"
+          sed -i "s|^LIBBPF_HEADERS_SHA256=.*|LIBBPF_HEADERS_SHA256=${hsum}|" v/build/versions.env
+          grep -E '^CLANG_SHA256_|^LIBBPF_HEADERS_SHA256=' v/build/versions.env
+
+      - name: Publish version-addressed toolchain assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          . v/build/versions.env
+          # A consumer's cache fetches from a stable "toolchain" release; asset
+          # names carry the version so a bump adds new assets beside the old
+          # ones instead of replacing them.
+          gh release view toolchain >/dev/null 2>&1 \
+            || gh release create toolchain --title "toolchain" \
+                 --notes "Version-addressed static build toolchain assets."
+          cp v/x86_64/clang   "clang-x86_64-llvm${LLVM_VERSION}"
+          cp v/aarch64/clang  "clang-aarch64-llvm${LLVM_VERSION}"
+          cp libbpf-headers.tar.gz "libbpf-headers-v${BPFTOOL_VERSION}.tar.gz"
+          # --clobber so re-running for the same version refreshes the asset.
+          gh release upload toolchain \
+            "clang-x86_64-llvm${LLVM_VERSION}" \
+            "clang-aarch64-llvm${LLVM_VERSION}" \
+            "libbpf-headers-v${BPFTOOL_VERSION}.tar.gz" --clobber
+
+      - name: Commit vendored toolchain
+        run: |
+          set -euo pipefail
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add v/x86_64 v/aarch64 v/include v/build/versions.env
+          if git diff --cached --quiet; then
+            echo "no changes to vendored toolchain"
+          else
+            . v/build/versions.env
+            git commit -m "v: vendor static clang ${LLVM_VERSION} + bpftool ${BPFTOOL_VERSION} + esbuild ${ESBUILD_VERSION} + libbpf ${BPFTOOL_VERSION} headers (x86_64, aarch64)"
+            git push
+          fi
