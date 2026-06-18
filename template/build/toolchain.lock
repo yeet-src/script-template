@@ -13,7 +13,7 @@ CLANG_SHA256_aarch64=105fb2d324095127a127bcba56702a86229ed8892ce6429802d30585fa2
 # populating its local toolchain cache. Assets are version-addressed
 # (clang-<arch>-llvm<version>) on a stable "toolchain" release, so older pins
 # keep resolving their exact binary after a toolchain bump.
-TOOLCHAIN_BASE_URL=https://github.com/yeet-src/script-template/releases/download/toolchain
+TOOLCHAIN_BASE_URL=https://github.com/yeet-src/toolchain/releases/download/toolchain
 
 # bpftool — official static binary from libbpf/bpftool, re-hosted on our
 # "toolchain" release so the build fetches everything from one place. CI
