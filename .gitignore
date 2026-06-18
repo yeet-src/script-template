@@ -8,13 +8,6 @@ template/bin/*
 !template/bin/.gitkeep
 template/src/bpf/include/vmlinux.h
 
-# Vendored toolchain binaries are distributed via release assets + a shared
-# per-machine cache (see v/build/toolchain), never committed — they would add
-# hundreds of MB to git history. The build recipe (v/build) and the small
-# libbpf SDK headers (v/include) ARE tracked.
-/v/x86_64/
-/v/aarch64/
-
 # A generated .clangd (from `make clangd`) may hold a machine-specific cache
 # path; keep it local.
 template/.clangd.local
