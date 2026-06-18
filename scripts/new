@@ -62,4 +62,8 @@ for f in package.json package-lock.json README.md; do
 	mv "$tmp" "$DEST/$f"
 done
 
-echo "created '$NAME' in $DEST — cd there, run 'make', then 'yeet run .'"
+# Finalize via the project's Makefile (git init with the vendored git). The
+# generation logic lives in `make postgen`, not here — this just calls it.
+make -C "$DEST" postgen || echo "warning: 'make postgen' failed" >&2
+
+echo "created '$NAME' in $DEST — cd there, run 'yeet build', then 'yeet run'"
