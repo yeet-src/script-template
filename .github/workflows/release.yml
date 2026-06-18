@@ -1,0 +1,75 @@
+name: release-latest
+
+on:
+  push:
+    branches: [master]
+
+# Allow the workflow to create/update releases and tags.
+permissions:
+  contents: write
+
+concurrency:
+  group: release-latest
+  cancel-in-progress: false
+
+jobs:
+  archive:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Compute next version
+        id: version
+        run: |
+          # Find the highest existing vX.Y tag and bump by 0.1 (working in
+          # tenths to avoid float drift). First release is v0.1.
+          latest="$(git tag -l 'v[0-9]*.[0-9]*' \
+            | sed 's/^v//' \
+            | sort -t. -k1,1n -k2,2n \
+            | tail -1)"
+          if [ -z "$latest" ]; then
+            next="0.1"
+          else
+            tenths=$(( $(echo "$latest" | awk -F. '{print $1*10 + $2}') + 1 ))
+            next="$(( tenths / 10 )).$(( tenths % 10 ))"
+          fi
+          echo "tag=v${next}" >> "$GITHUB_OUTPUT"
+          echo "Next version: v${next}"
+
+      - name: Create repo archive
+        id: archive
+        run: |
+          # Pack the working tree (minus .git) into a zstd-compressed tarball.
+          repo="${GITHUB_REPOSITORY##*/}"
+          tar \
+            --exclude="./.git" \
+            --use-compress-program "zstd -19 -T0" \
+            -cf "${RUNNER_TEMP}/${repo}.tar.zst" \
+            -C "${GITHUB_WORKSPACE}" .
+          echo "asset=${RUNNER_TEMP}/${repo}.tar.zst" >> "$GITHUB_OUTPUT"
+
+      - name: Publish versioned release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ steps.version.outputs.tag }}" \
+            "${{ steps.archive.outputs.asset }}" \
+            --title "${{ steps.version.outputs.tag }}" \
+            --notes "Repo snapshot of ${GITHUB_SHA}" \
+            --target "${GITHUB_SHA}"
+
+      - name: Update rolling "latest" release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # Move the rolling "latest" tag/release to this commit so the
+          # stable .../releases/latest/download/ URL tracks the newest build.
+          gh release delete latest --yes --cleanup-tag || true
+          gh release create latest "${{ steps.archive.outputs.asset }}" \
+            --title "latest" \
+            --notes "Repo snapshot of ${GITHUB_SHA} (${{ steps.version.outputs.tag }})" \
+            --target "${GITHUB_SHA}"
