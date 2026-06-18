@@ -1,0 +1,45 @@
+# syntax=docker/dockerfile:1
+#
+# Build a lean, fully-static git — enough to `git init` a generated project
+# and do local commits. Network features are disabled (NO_CURL/NO_OPENSSL), so
+# there's no https clone/push and no static libcurl/openssl to wrangle; the
+# result is a small self-contained binary, quick to build on any arch.
+#
+#   docker buildx build --platform linux/amd64 \
+#     -f Dockerfile.git --build-arg GIT_VERSION=2.54.0 \
+#     --target export --output type=local,dest=./out .
+#
+# Extracts /git into ./out/git.
+
+ARG ALPINE_TAG=alpine:3.21
+
+FROM ${ALPINE_TAG} AS build
+ARG GIT_VERSION=2.54.0
+
+# zlib is git's one hard dependency; link it statically. Everything else
+# (curl, openssl, pcre, tcl, gettext, perl/python scaffolding) is turned off.
+RUN apk add --no-cache gcc musl-dev make curl tar xz binutils zlib-dev zlib-static
+
+WORKDIR /src
+RUN curl -fSL -o git.tar.xz \
+        "https://mirrors.edge.kernel.org/pub/software/scm/git/git-${GIT_VERSION}.tar.xz" \
+ && tar xf git.tar.xz \
+ && rm git.tar.xz
+
+WORKDIR /src/git-${GIT_VERSION}
+RUN make -j"$(nproc)" \
+        NO_CURL=1 NO_OPENSSL=1 NO_TCLTK=1 NO_GETTEXT=1 NO_PYTHON=1 \
+        NO_INSTALL_HARDLINKS=1 NO_PERL=1 \
+        NO_REGEX=1 \
+        CFLAGS="-O2 -static" LDFLAGS="-static" \
+        git \
+ && strip git \
+ && if readelf -l git | grep -q INTERP; then echo "ERROR: git is not static"; exit 1; fi \
+ && echo "confirmed: no PT_INTERP -> fully static" \
+ && cp git /git \
+ # Prove it can initialize a repo with no external helpers on PATH.
+ && /git init -q /tmp/t && /git -C /tmp/t rev-parse --is-inside-work-tree >/dev/null \
+ && echo "confirmed: git init works standalone"
+
+FROM scratch AS export
+COPY --from=build /git /git

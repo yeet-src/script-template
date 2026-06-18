@@ -1,10 +1,11 @@
 # Build the yeet script project.
 #
-#   make        — build everything (BPF objects + JS bundle)
-#   make bpf    — compile bpf/*.bpf.c into bin/* only
-#   make bundle — resolve npm/jsr deps and bundle the JS entry
-#   make clangd — write a local .clangd pointing at the resolved toolchain
-#   make clean  — remove build artifacts
+#   make         — build everything (BPF objects + JS bundle)
+#   make bpf     — compile bpf/*.bpf.c into bin/* only
+#   make bundle  — resolve npm/jsr deps and bundle the JS entry
+#   make postgen — finalize a freshly generated project (git init)
+#   make clangd  — write a local .clangd pointing at the resolved toolchain
+#   make clean   — remove build artifacts
 #
 # This is the build *frontend*: it orchestrates two independent
 # compilers — clang for the BPF objects, esbuild for the JS bundle.
@@ -47,7 +48,22 @@ node_modules: package.json
 	$(NPM) install
 	@touch node_modules
 
+# Post-generation finalize: initialize a git repository with the vendored git
+# (fetched via `vendored-git`). Idempotent — skipped if this is already a repo.
+# The scaffolders (`yeet new`, `scripts/new`) run `make postgen` after creating
+# the project, so the CLI itself stays a thin caller of make.
+postgen: | vendored-git
+	@g="$(GIT)"; [ -x "$$g" ] || g="$$(command -v git 2>/dev/null || true)"; \
+	if [ -e .git ]; then \
+		echo "postgen: already a git repository"; \
+	elif [ -n "$$g" ]; then \
+		echo "postgen: git init"; \
+		"$$g" -c init.templateDir= init -q . || echo "warning: 'git init' failed" >&2; \
+	else \
+		echo "warning: no git available (vendored or host); skipping 'git init'" >&2; \
+	fi
+
 clean: clean-bpf
 	rm -rf node_modules dist src/index.jsx
 
-.PHONY: all bundle clean
+.PHONY: all bundle clean postgen
