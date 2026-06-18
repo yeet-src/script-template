@@ -44,13 +44,12 @@ jobs:
         id: archive
         run: |
           # Pack the working tree (minus .git) into a zstd-compressed tarball.
-          # Exclude v/ — the static toolchain (~hundreds of MB) is distributed
-          # on demand into a shared per-machine cache (see v/build/toolchain),
-          # not shipped inside every per-version script archive.
+          # The static toolchain lives in its own repo (yeet-src/toolchain) and
+          # is fetched on demand into a per-machine cache, so nothing heavy
+          # ships in this archive.
           repo="${GITHUB_REPOSITORY##*/}"
           tar \
             --exclude="./.git" \
-            --exclude="./v" \
             --use-compress-program "zstd -19 -T0" \
             -cf "${RUNNER_TEMP}/${repo}.tar.zst" \
             -C "${GITHUB_WORKSPACE}" .
