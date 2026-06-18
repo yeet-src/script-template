@@ -15,7 +15,7 @@ UNAME_M := $(shell uname -m)
 TOOLCHAIN_LOCK := $(firstword $(wildcard build/toolchain.lock))
 ifneq ($(TOOLCHAIN_LOCK),)
   include $(TOOLCHAIN_LOCK)
-  TOOLCHAIN_KEY  := llvm$(LLVM_VERSION)-bpftool$(BPFTOOL_VERSION)-esbuild$(ESBUILD_VERSION)-make$(MAKE_VERSION)-git$(GIT_VERSION)
+  TOOLCHAIN_KEY  := v$(TOOLCHAIN_VERSION)
   YEET_CACHE_DIR ?= $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/yeet
   TOOLCHAIN_DIR  := $(YEET_CACHE_DIR)/toolchain/$(TOOLCHAIN_KEY)/$(UNAME_M)
   CLANG   ?= $(TOOLCHAIN_DIR)/clang
