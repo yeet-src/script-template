@@ -7,9 +7,9 @@ bpftool installed. One subdirectory per architecture, named to match
 
 ```
 v/
-  x86_64/   clang  bpftool  esbuild     # per-arch static binaries
-  aarch64/  clang  bpftool  esbuild
-  include/  bpf/*.h                     # arch-independent libbpf SDK headers
+  x86_64/   make  clang  bpftool  esbuild     # per-arch static binaries
+  aarch64/  make  clang  bpftool  esbuild
+  include/  bpf/*.h                           # arch-independent libbpf SDK headers
   build/    build recipe + version pins (below)
 ```
 
@@ -18,6 +18,7 @@ run on any glibc or musl Linux of the matching arch.
 
 | item              | what the build uses it for                              | source |
 |-------------------|---------------------------------------------------------|--------|
+| `make`            | drive the build. Bootstrapped by `yeet build` (it can't fetch itself) | built from GNU make source, musl-static |
 | `clang`           | compile `src/bpf/*.bpf.c` (`-target bpf`)               | built from LLVM source, musl-static |
 | `bpftool`         | generate `vmlinux.h` (BTF dump) and link BPF objects (`gen object`) | official static release, [libbpf/bpftool] |
 | `esbuild`         | bundle the JS entry (`src/main.jsx` → `src/index.jsx`)  | official static (Go) binary, [@esbuild/*] |
@@ -56,6 +57,12 @@ there, then regenerate.
 v/build/fetch-bpftool.sh         # both arches
 v/build/fetch-esbuild.sh         # both arches
 v/build/fetch-libbpf-headers.sh  # into v/include/bpf (matches bpftool version)
+```
+
+**make** (compiled from source, but tiny — seconds per arch, even emulated):
+
+```sh
+v/build/build-make.sh arm64      # or: amd64
 ```
 
 **clang** (compiled from source). Build per-arch on a **native** machine — an
