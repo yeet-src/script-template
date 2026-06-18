@@ -58,6 +58,25 @@ jobs:
           path: out/clang
           if-no-files-found: error
 
+      - name: Build static make (${{ matrix.arch }})
+        run: |
+          set -euo pipefail
+          . v/build/versions.env
+          docker buildx build \
+            --platform "linux/${{ matrix.platform }}" \
+            -f v/build/Dockerfile.make \
+            --build-arg "MAKE_VERSION=${MAKE_VERSION}" \
+            --build-arg "ALPINE_TAG=${ALPINE_TAG}" \
+            --target export \
+            --output "type=local,dest=outmake" \
+            v/build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: make-${{ matrix.arch }}
+          path: outmake/make
+          if-no-files-found: error
+
   vendor:
     needs: clang
     runs-on: ubuntu-latest
@@ -74,6 +93,8 @@ jobs:
           set -euo pipefail
           install -Dm755 artifacts/clang-x86_64/clang  v/x86_64/clang
           install -Dm755 artifacts/clang-aarch64/clang v/aarch64/clang
+          install -Dm755 artifacts/make-x86_64/make    v/x86_64/make
+          install -Dm755 artifacts/make-aarch64/make   v/aarch64/make
           sh v/build/fetch-bpftool.sh
           sh v/build/fetch-esbuild.sh
           sh v/build/fetch-libbpf-headers.sh
@@ -90,12 +111,14 @@ jobs:
         run: |
           set -euo pipefail
           for arch in x86_64 aarch64; do
-            sum="$(sha256sum "v/$arch/clang" | awk '{print $1}')"
-            sed -i "s|^CLANG_SHA256_${arch}=.*|CLANG_SHA256_${arch}=${sum}|" v/build/versions.env
+            csum="$(sha256sum "v/$arch/clang" | awk '{print $1}')"
+            sed -i "s|^CLANG_SHA256_${arch}=.*|CLANG_SHA256_${arch}=${csum}|" v/build/versions.env
+            msum="$(sha256sum "v/$arch/make" | awk '{print $1}')"
+            sed -i "s|^MAKE_SHA256_${arch}=.*|MAKE_SHA256_${arch}=${msum}|" v/build/versions.env
           done
           hsum="$(sha256sum libbpf-headers.tar.gz | awk '{print $1}')"
           sed -i "s|^LIBBPF_HEADERS_SHA256=.*|LIBBPF_HEADERS_SHA256=${hsum}|" v/build/versions.env
-          grep -E '^CLANG_SHA256_|^LIBBPF_HEADERS_SHA256=' v/build/versions.env
+          grep -E '^CLANG_SHA256_|^MAKE_SHA256_|^LIBBPF_HEADERS_SHA256=' v/build/versions.env
 
       - name: Publish version-addressed toolchain assets
         env:
@@ -111,23 +134,31 @@ jobs:
                  --notes "Version-addressed static build toolchain assets."
           cp v/x86_64/clang   "clang-x86_64-llvm${LLVM_VERSION}"
           cp v/aarch64/clang  "clang-aarch64-llvm${LLVM_VERSION}"
+          cp v/x86_64/make    "make-x86_64-${MAKE_VERSION}"
+          cp v/aarch64/make   "make-aarch64-${MAKE_VERSION}"
           cp libbpf-headers.tar.gz "libbpf-headers-v${BPFTOOL_VERSION}.tar.gz"
           # --clobber so re-running for the same version refreshes the asset.
           gh release upload toolchain \
             "clang-x86_64-llvm${LLVM_VERSION}" \
             "clang-aarch64-llvm${LLVM_VERSION}" \
+            "make-x86_64-${MAKE_VERSION}" \
+            "make-aarch64-${MAKE_VERSION}" \
             "libbpf-headers-v${BPFTOOL_VERSION}.tar.gz" --clobber
 
-      - name: Commit vendored toolchain
+      - name: Commit headers + recorded checksums
         run: |
           set -euo pipefail
+          # Binaries are NOT committed — they are published as release assets
+          # above and fetched into the per-machine cache. Only the small SDK
+          # headers and the recorded checksums land in git (v/<arch>/ is
+          # gitignored, so an accidental add is a no-op).
           git config user.name  "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add v/x86_64 v/aarch64 v/include v/build/versions.env
+          git add v/include v/build/versions.env
           if git diff --cached --quiet; then
-            echo "no changes to vendored toolchain"
+            echo "no changes to commit"
           else
             . v/build/versions.env
-            git commit -m "v: vendor static clang ${LLVM_VERSION} + bpftool ${BPFTOOL_VERSION} + esbuild ${ESBUILD_VERSION} + libbpf ${BPFTOOL_VERSION} headers (x86_64, aarch64)"
+            git commit -m "v: publish static clang ${LLVM_VERSION} + bpftool ${BPFTOOL_VERSION} + esbuild ${ESBUILD_VERSION} + libbpf headers (x86_64, aarch64)"
             git push
           fi

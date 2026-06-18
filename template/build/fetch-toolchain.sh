@@ -45,6 +45,18 @@ place() { # tmpfile destname
 	mv -f "$1" "$DIR/$2"
 }
 
+# --- make: our version-addressed release asset ---------------------------
+# The build driver. `yeet build` fetches it via this script before invoking
+# it, so it is here for completeness (and for `make`'s own toolchain target).
+if [ ! -x "$DIR/make" ]; then
+	eval "want=\${MAKE_SHA256_${ARCH}:-}"
+	echo ">> fetch make ${MAKE_VERSION} (${ARCH})"
+	tmp="$DIR/.make.$$"
+	curl -fSL --retry 3 -o "$tmp" "${TOOLCHAIN_BASE_URL}/make-${ARCH}-${MAKE_VERSION}"
+	verify "$tmp" "$want" "make" || { rm -f "$tmp"; exit 1; }
+	place "$tmp" make
+fi
+
 # --- clang: our version-addressed release asset --------------------------
 if [ ! -x "$DIR/clang" ]; then
 	eval "want=\${CLANG_SHA256_${ARCH}:-}"
