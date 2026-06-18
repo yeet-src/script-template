@@ -1,17 +1,14 @@
 #!/bin/sh
-# Populate a shared toolchain cache directory, downloading each tool only if
-# it is missing. Every artifact comes from our single version-addressed
-# "toolchain" release and is checksum-verified against the pins in the lock.
+# Populate a shared toolchain cache directory, downloading only missing tools.
+# Every artifact comes from one immutable, version-tagged release of the
+# toolchain repo (releases/download/v<TOOLCHAIN_VERSION>/) and is
+# checksum-verified against the pins in the lock.
 #
 #   build/fetch-toolchain.sh <dest-dir> <uname-arch> <lock> [tool...]
 #
 # With no trailing tool names, all tools are fetched (the build's `toolchain`
-# target). Pass names (e.g. `git`) to fetch only those — `postgen.sh` uses
-# this to grab just git at generation time without pulling the whole toolchain.
-#
-# Idempotent: a present binary is left untouched, so the first build downloads
-# the toolchain and every later build (or other project on the same version)
-# is a cache hit.
+# target). Pass names (e.g. `git`) to fetch only those — `postgen` uses this to
+# grab just git at generation time without pulling the whole toolchain.
 
 set -eu
 
@@ -31,6 +28,9 @@ esac
 
 mkdir -p "$DIR"
 
+# The one immutable release every asset is fetched from.
+REL="${TOOLCHAIN_BASE_URL}/v${TOOLCHAIN_VERSION}"
+
 want() { [ -z "$FILTER" ] && return 0; case " $FILTER " in *" $1 "*) return 0 ;; esac; return 1; }
 
 sha() {
@@ -47,35 +47,33 @@ verify() { # file want-sha label
 
 get_sha() { eval "printf '%s' \"\${${1}_SHA256_${ARCH}:-}\""; }  # get_sha CLANG
 
-# fetch_bin <tool-name> <release-asset-name>
-# Atomic: download beside the target, verify, then rename, so a concurrent
-# build never sees a half-written binary.
+# fetch_bin <tool-name> — asset is <tool>-<arch> inside the version release.
+# Atomic: download beside the target, verify, then rename.
 fetch_bin() {
-	name="$1"; asset="$2"
+	name="$1"
 	want "$name" || return 0
 	[ -x "$DIR/$name" ] && return 0
-	echo ">> fetch ${name} (${ARCH})"
+	echo ">> fetch ${name} (${ARCH}, v${TOOLCHAIN_VERSION})"
 	tmp="$DIR/.${name}.$$"
-	curl -fSL --retry 3 -o "$tmp" "${TOOLCHAIN_BASE_URL}/${asset}"
+	curl -fSL --retry 3 -o "$tmp" "${REL}/${name}-${ARCH}"
 	verify "$tmp" "$(get_sha "$(echo "$name" | tr a-z A-Z)")" "$name" || { rm -f "$tmp"; exit 1; }
 	chmod +x "$tmp"
 	mv -f "$tmp" "$DIR/$name"
 }
 
-fetch_bin make    "make-${ARCH}-${MAKE_VERSION}"
-fetch_bin clang   "clang-${ARCH}-llvm${LLVM_VERSION}"
-fetch_bin bpftool "bpftool-${ARCH}-v${BPFTOOL_VERSION}"
-fetch_bin esbuild "esbuild-${ARCH}-${ESBUILD_VERSION}"
-fetch_bin git     "git-${ARCH}-v${GIT_VERSION}"
+fetch_bin make
+fetch_bin clang
+fetch_bin bpftool
+fetch_bin esbuild
+fetch_bin git
 
-# libbpf program headers: arch-independent, one copy per version key, beside
-# the per-arch tool dirs ($key/include/bpf/*.h).
+# libbpf program headers: arch-independent, one copy per version, beside the
+# per-arch tool dirs ($key/include/bpf/*.h).
 INC="$(dirname "$DIR")/include"
 if want headers && [ ! -e "$INC/bpf/bpf_helpers.h" ]; then
-	echo ">> fetch libbpf headers (bpftool ${BPFTOOL_VERSION})"
+	echo ">> fetch libbpf headers (v${TOOLCHAIN_VERSION})"
 	td="$(mktemp -d)"
-	curl -fSL --retry 3 -o "$td/h.tgz" \
-		"${TOOLCHAIN_BASE_URL}/libbpf-headers-v${BPFTOOL_VERSION}.tar.gz"
+	curl -fSL --retry 3 -o "$td/h.tgz" "${REL}/libbpf-headers.tar.gz"
 	verify "$td/h.tgz" "${LIBBPF_HEADERS_SHA256:-}" "libbpf-headers" || { rm -rf "$td"; exit 1; }
 	mkdir -p "$INC"
 	tar xzf "$td/h.tgz" -C "$INC"   # tarball holds a top-level bpf/ dir
