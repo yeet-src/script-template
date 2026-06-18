@@ -7,9 +7,9 @@ bpftool installed. One subdirectory per architecture, named to match
 
 ```
 v/
-  x86_64/   make  clang  bpftool  esbuild     # per-arch static binaries
-  aarch64/  make  clang  bpftool  esbuild
-  include/  bpf/*.h                           # arch-independent libbpf SDK headers
+  x86_64/   make  clang  bpftool  esbuild  git     # per-arch static binaries
+  aarch64/  make  clang  bpftool  esbuild  git
+  include/  bpf/*.h                                # arch-independent libbpf SDK headers
   build/    build recipe + version pins (below)
 ```
 
@@ -20,9 +20,16 @@ run on any glibc or musl Linux of the matching arch.
 |-------------------|---------------------------------------------------------|--------|
 | `make`            | drive the build. Bootstrapped by `yeet build` (it can't fetch itself) | built from GNU make source, musl-static |
 | `clang`           | compile `src/bpf/*.bpf.c` (`-target bpf`)               | built from LLVM source, musl-static |
-| `bpftool`         | generate `vmlinux.h` (BTF dump) and link BPF objects (`gen object`) | official static release, [libbpf/bpftool] |
-| `esbuild`         | bundle the JS entry (`src/main.jsx` → `src/index.jsx`)  | official static (Go) binary, [@esbuild/*] |
+| `bpftool`         | generate `vmlinux.h` (BTF dump) and link BPF objects (`gen object`) | official static binary from [libbpf/bpftool], re-hosted |
+| `esbuild`         | bundle the JS entry (`src/main.jsx` → `src/index.jsx`)  | official static (Go) binary from [@esbuild/*], re-hosted |
+| `git`             | `git init` a freshly generated project (`make postgen`) | built from git source, musl-static, lean (no https) |
 | `include/bpf/*.h` | libbpf program headers a `.bpf.c` includes (`<bpf/bpf_helpers.h>`, …) | libbpf bundled with bpftool |
+
+Every artifact a build downloads is fetched from **one place** — our
+version-addressed `toolchain` release — and checksum-verified. clang and make
+are built from source; bpftool, esbuild and the libbpf headers are pulled from
+their upstreams **at publish time** (in CI) and re-hosted there, so a build
+depends only on that single release, not on npm or libbpf staying reachable.
 
 The libbpf headers are **SDK-level, not application source** — they are tied
 to the bpftool/libbpf version and shared across arches, so they live with the
@@ -59,10 +66,11 @@ v/build/fetch-esbuild.sh         # both arches
 v/build/fetch-libbpf-headers.sh  # into v/include/bpf (matches bpftool version)
 ```
 
-**make** (compiled from source, but tiny — seconds per arch, even emulated):
+**make** and **git** (compiled from source, but tiny — seconds per arch, even emulated):
 
 ```sh
 v/build/build-make.sh arm64      # or: amd64
+v/build/build-git.sh  arm64      # or: amd64
 ```
 
 **clang** (compiled from source). Build per-arch on a **native** machine — an

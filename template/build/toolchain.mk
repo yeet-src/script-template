@@ -31,6 +31,7 @@ ifneq ($(VENDORED_CLANG),)
   CLANG   ?= $(VENDORED)/clang
   BPFTOOL ?= $(VENDORED)/bpftool
   ESBUILD ?= $(VENDORED)/esbuild
+  GIT     ?= $(VENDORED)/git
   # libbpf program headers (bpf_helpers.h, …) are SDK-level, not app source:
   # shared across arches under v/include, version-tied to bpftool/libbpf.
   BPF_SYSINCLUDE ?= $(dir $(VENDORED))include
@@ -42,20 +43,22 @@ else
   TOOLCHAIN_LOCK := $(firstword $(wildcard build/toolchain.lock ../v/build/versions.env))
   ifneq ($(TOOLCHAIN_LOCK),)
     include $(TOOLCHAIN_LOCK)
-    TOOLCHAIN_KEY  := llvm$(LLVM_VERSION)-bpftool$(BPFTOOL_VERSION)-esbuild$(ESBUILD_VERSION)-make$(MAKE_VERSION)
+    TOOLCHAIN_KEY  := llvm$(LLVM_VERSION)-bpftool$(BPFTOOL_VERSION)-esbuild$(ESBUILD_VERSION)-make$(MAKE_VERSION)-git$(GIT_VERSION)
     YEET_CACHE_DIR ?= $(if $(XDG_CACHE_HOME),$(XDG_CACHE_HOME),$(HOME)/.cache)/yeet
     TOOLCHAIN_DIR  := $(YEET_CACHE_DIR)/toolchain/$(TOOLCHAIN_KEY)/$(UNAME_M)
     CLANG   ?= $(TOOLCHAIN_DIR)/clang
     BPFTOOL ?= $(TOOLCHAIN_DIR)/bpftool
     ESBUILD ?= $(TOOLCHAIN_DIR)/esbuild
+    GIT     ?= $(TOOLCHAIN_DIR)/git
     # Headers are arch-independent: one copy per version key, beside the
     # per-arch tool dirs.
     BPF_SYSINCLUDE ?= $(YEET_CACHE_DIR)/toolchain/$(TOOLCHAIN_KEY)/include
   endif
 endif
 
-# 3. PATH fallback for esbuild (bpf.mk supplies the clang/bpftool fallbacks).
+# 3. PATH fallbacks (bpf.mk supplies the clang/bpftool fallbacks).
 ESBUILD ?= esbuild
+GIT     ?= git
 
 # Ensure the cache holds this arch's tools, fetching any that are missing.
 # A no-op for the in-repo and PATH cases (nothing to download).
@@ -63,6 +66,17 @@ ESBUILD ?= esbuild
 toolchain:
 ifneq ($(TOOLCHAIN_LOCK),)
 	@sh build/fetch-toolchain.sh "$(TOOLCHAIN_DIR)" "$(UNAME_M)" "$(TOOLCHAIN_LOCK)"
+else
+	@:
+endif
+
+# Fetch only git into the cache — used by the `postgen` target so generating a
+# project doesn't pull the whole build toolchain just to initialize a repo.
+.PHONY: vendored-git
+vendored-git:
+ifneq ($(TOOLCHAIN_LOCK),)
+	@sh build/fetch-toolchain.sh "$(TOOLCHAIN_DIR)" "$(UNAME_M)" "$(TOOLCHAIN_LOCK)" git \
+		|| echo "note: vendored git unavailable; postgen will fall back to host git" >&2
 else
 	@:
 endif
