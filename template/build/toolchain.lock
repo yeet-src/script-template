@@ -4,8 +4,10 @@
 # Toolchain bundle version. Each publish is an immutable, version-tagged
 # release `v<TOOLCHAIN_VERSION>` holding the whole set; consumers pin this one
 # number, and the cache is keyed by it (cache/yeet/toolchain/v<N>/<arch>/). CI
-# bumps it by 0.1 on every publish (which only happens when build/ changes).
-TOOLCHAIN_VERSION=0.9
+# sets it to the next semver tag it computes from the [bump:*] commit markers
+# (default minor; see the README). A release is cut only when build/ or the
+# vendor workflow changes.
+TOOLCHAIN_VERSION=0.8.0
 
 # Where a consumer fetches assets from: the version-tagged release. The fetch
 # appends `/v<TOOLCHAIN_VERSION>/<tool>-<arch>`.
@@ -27,7 +29,7 @@ CLANG_SHA256_aarch64=105fb2d324095127a127bcba56702a86229ed8892ce6429802d30585fa2
 BPFTOOL_VERSION=7.7.0
 BPFTOOL_SHA256_x86_64=74bd16335aa1c40714fb50287a42766c6faa4958f969cce32fef89485ce4934c
 BPFTOOL_SHA256_aarch64=2b3fc4dd5e4e40bd8d670c5f1fa9693b3f879a122c0f6a3eb806dfc6735da6b7
-LIBBPF_HEADERS_SHA256=3ee641e70dc8f2fcb4fe32387c48c9ee445fd3445e027c3378ae61a63ee7044e
+LIBBPF_HEADERS_SHA256=dba9a3583076fce1ab2739b6edba1460f64327accda449202892108e9d1a3c65
 
 # veristat — BPF verifier statistics tool, used to check that built `*.bpf.o`
 # programs load and to track verifier complexity. Official static binary from
@@ -79,8 +81,8 @@ LVH_SHA256_x86_64=ca3b958ffc08a4b65e4c6c8d29a4dad077acd11f146bc84f75a30ecaa031e9
 LVH_SHA256_aarch64=49b7cef6376c445c0ab23465ecc984a771e06b3b37c39b486a4fed7fb1ded476
 # Per-arch checksum of the published qemu-<arch>.tar.gz (binary + minimal
 # share/qemu blobs). CI records these; the matrix runner verifies the tarball.
-QEMU_SHA256_x86_64=78426e11bc2c38d235b9c3d44ac1eac9451a7f92ebc3c3dd3e98b38630e300d8
-QEMU_SHA256_aarch64=2ea94a4f44e4681c17576af88144d21bc70bc9b5f605a5f8152949b683034b93
+QEMU_SHA256_x86_64=0add524e0dd366ead34332aed0dafb4f11bc75f17884896aedb91faa28176dc2
+QEMU_SHA256_aarch64=be362492c2054c734bac78a776f17c0e0511f317d1dd8c924e82e00f8a7b2137
 
 # Alpine base used for the musl-static clang build.
 ALPINE_TAG=alpine:3.21

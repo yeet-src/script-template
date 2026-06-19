@@ -1,0 +1,67 @@
+name: commit-convention
+
+# Guard the version-bump markers the vendor workflow reads to pick the next
+# release's semver bump. Markers are namespaced [bump:patch|minor|major]; a
+# typo like [bump:pacth] would otherwise silently ship as a default minor, so
+# reject anything malformed before merge. Make this a required status check on
+# master so it actually blocks the merge.
+on:
+  pull_request:
+    types: [opened, edited, reopened, synchronize]
+  # The merge queue fires merge_group and waits for required checks to report on
+  # it. Markers are already validated at PR time, so the job just needs to run
+  # and pass here — otherwise a required "markers" check deadlocks the queue.
+  merge_group:
+
+permissions:
+  contents: read
+
+jobs:
+  markers:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Validate [bump:*] markers
+        if: github.event_name == 'pull_request'   # merge_group: validated at PR time, just report green
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -euo pipefail
+          # Scan the PR title plus each commit's SUBJECT line (not the body) —
+          # the marker lives in the subject, like [skip ci], so prose in a body
+          # that merely documents the markers never trips the check. The
+          # namespaced bump:<level> form also won't collide with ordinary
+          # bracket text ([skip ci], markdown links, …).
+          commits="$(git log --format=%s "${BASE_SHA}..${HEAD_SHA}" 2>/dev/null || true)"
+          text="$PR_TITLE
+          $commits"
+
+          fail=false
+
+          # A candidate marker is a single token [bump:<word>]. Prose/notation
+          # like [bump:patch|minor|major] or [bump:*] (pipes, stars, spaces)
+          # isn't a marker attempt — only a malformed SINGLE level is a typo.
+          bad="$(printf '%s' "$text" \
+            | grep -oiE '\[bump:[a-z0-9.]+\]' \
+            | grep -viE '\[bump:(patch|minor|major)\]' || true)"
+          if [ -n "$bad" ]; then
+            echo "::error::Unrecognised bump marker(s): $(printf '%s' "$bad" | tr '\n' ' ')"
+            echo "Valid markers: [bump:patch], [bump:minor], [bump:major]."
+            fail=true
+          fi
+
+          if $fail; then
+            echo "See the commit convention in README.md."
+            exit 1
+          fi
+
+          # Advisory: report the level this PR is asking for.
+          if   printf '%s' "$text" | grep -qi '\[bump:major\]'; then lvl="major"
+          elif printf '%s' "$text" | grep -qi '\[bump:patch\]'; then lvl="patch (only if every commit in the release range is [bump:patch])"
+          else lvl="minor (default)"; fi
+          echo "✓ bump markers valid — this PR requests a **${lvl}** bump" >> "$GITHUB_STEP_SUMMARY"
