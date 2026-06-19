@@ -166,14 +166,36 @@ jobs:
           sed -i "s|^LIBBPF_HEADERS_SHA256=.*|LIBBPF_HEADERS_SHA256=${hsum}|" build/versions.env
           grep -E '_SHA256_|^LIBBPF_HEADERS_SHA256=' build/versions.env
 
+      - name: Tag immutable v${{ env.TC }} snapshot
+        run: |
+          set -euo pipefail
+          tag="v${TC}"
+          # master is protected (PR/merge-queue only), so we never push it. The
+          # recorded lock (bumped version + checksums) and the SDK headers land
+          # in the commit the version tag points at, so the tag is fully
+          # self-contained: `git show ${tag}:build/versions.env` yields the exact
+          # lock for this release. Binaries are NOT committed — they ride the
+          # release as assets (x86_64/ and aarch64/ are gitignored).
+          if git ls-remote --exit-code --tags origin "refs/tags/${tag}" >/dev/null 2>&1; then
+            echo "tag ${tag} already exists — leaving the immutable tag as-is"
+          else
+            git config user.name  "github-actions[bot]"
+            git config user.email "github-actions[bot]@users.noreply.github.com"
+            git add include build/versions.env
+            git commit -m "toolchain ${tag}: record version, checksums + headers"
+            git tag -a "$tag" -m "Static build toolchain ${tag}"
+            git push origin "refs/tags/${tag}"
+          fi
+
       - name: Publish v${{ env.TC }} release
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           tag="v${TC}"
-          # Immutable, version-tagged release; the tag carries the version, so
-          # assets are plain-named (<tool>-<arch>). Consumers pin this one tag.
+          # Immutable, version-tagged release pinned to the snapshot tag above;
+          # the tag carries the version, so assets are plain-named (<tool>-<arch>).
+          # Consumers pin this one tag.
           mkdir -p dist
           for a in x86_64 aarch64; do
             for t in clang make bpftool esbuild git; do cp "$a/$t" "dist/${t}-${a}"; done
@@ -184,20 +206,3 @@ jobs:
                  --notes "Static build toolchain $tag — clang/make/git built from source; bpftool/esbuild/libbpf headers re-hosted."
           # --clobber so a same-version re-run refreshes assets.
           gh release upload "$tag" dist/* --clobber
-
-      - name: Commit headers + recorded checksums
-        run: |
-          set -euo pipefail
-          # Binaries are NOT committed — they are published as release assets
-          # above and fetched into the per-machine cache. Only the SDK headers
-          # and the recorded checksums land in git (x86_64/ and aarch64/ are
-          # gitignored).
-          git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add include build/versions.env
-          if git diff --cached --quiet; then
-            echo "no changes to commit"
-          else
-            git commit -m "toolchain v${TC}: record version, checksums + headers"
-            git push
-          fi
