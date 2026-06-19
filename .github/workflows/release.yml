@@ -46,10 +46,13 @@ jobs:
           # Pack the working tree (minus .git) into a zstd-compressed tarball.
           # The static toolchain lives in its own repo (yeet-src/toolchain) and
           # is fetched on demand into a per-machine cache, so nothing heavy
-          # ships in this archive.
+          # ships in this archive. The toolchain/ subtree is dev-time source
+          # only (build recipe + embed glue) — the payload under template/build/
+          # already carries its synced copies, so exclude it from the archive.
           repo="${GITHUB_REPOSITORY##*/}"
           tar \
             --exclude="./.git" \
+            --exclude="./toolchain" \
             --use-compress-program "zstd -19 -T0" \
             -cf "${RUNNER_TEMP}/${repo}.tar.zst" \
             -C "${GITHUB_WORKSPACE}" .
