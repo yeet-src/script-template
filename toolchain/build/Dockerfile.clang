@@ -1,0 +1,88 @@
+# syntax=docker/dockerfile:1
+#
+# Build a fully-static, musl-linked `clang` from LLVM source — just enough
+# to compile the project's BPF objects (`clang -target bpf -O2 -g -c`).
+#
+# The output is ONE self-contained ELF binary with no shared-library
+# dependencies, so it runs on any Linux of the matching arch regardless of
+# the host libc. Build it per-arch on a NATIVE runner (emulated x86_64 on an
+# arm64 host takes many hours); see build-clang.sh / vendor.yml.
+#
+#   docker buildx build --platform linux/amd64 \
+#     -f Dockerfile.clang --build-arg LLVM_VERSION=22.1.8 \
+#     --target export --output type=local,dest=./out .
+#
+# Extracts /clang into ./out/clang.
+
+ARG ALPINE_TAG=alpine:3.21
+
+FROM ${ALPINE_TAG} AS build
+ARG LLVM_VERSION=22.1.8
+# Concurrency caps. Heavy LLVM translation units peak at 1-2GB of RAM each,
+# so compile parallelism is bounded by memory, not cores; the final static
+# link is the single biggest consumer, hence its own (smaller) cap. Override
+# COMPILE_JOBS up on a high-RAM runner.
+ARG COMPILE_JOBS=4
+ARG LINK_JOBS=1
+
+# g++ + musl static libs are the only link inputs we keep; every optional
+# LLVM dependency (zlib, zstd, libxml2, terminfo, libedit) is disabled below
+# so the final link has nothing dynamic to pull in.
+RUN apk add --no-cache \
+        cmake samurai g++ gcc make python3 git curl xz binutils \
+        musl-dev linux-headers libstdc++-dev
+
+WORKDIR /src
+RUN curl -fSL -o llvm.tar.xz \
+        "https://github.com/llvm/llvm-project/releases/download/llvmorg-${LLVM_VERSION}/llvm-project-${LLVM_VERSION}.src.tar.xz" \
+ && tar xf llvm.tar.xz \
+ && mv "llvm-project-${LLVM_VERSION}.src" llvm-project \
+ && rm llvm.tar.xz
+
+WORKDIR /src/llvm-project
+
+# Build clang and only the BPF backend. We always invoke clang with an
+# explicit `-target bpf`, so no host codegen target is needed — this is what
+# keeps the binary small and the build tractable. `-static*` flags make the
+# final link pull libc/libstdc++/libgcc in statically (musl supports full
+# static linking cleanly). Link jobs are capped at 1: the clang link peaks
+# at several GB and the runner has limited RAM.
+RUN cmake -G Ninja -S llvm -B build \
+        -DCMAKE_BUILD_TYPE=Release \
+        -DLLVM_ENABLE_PROJECTS=clang \
+        -DLLVM_TARGETS_TO_BUILD=BPF \
+        -DLLVM_DEFAULT_TARGET_TRIPLE=bpf \
+        -DLLVM_ENABLE_PIC=OFF \
+        -DLLVM_ENABLE_ZLIB=OFF \
+        -DLLVM_ENABLE_ZSTD=OFF \
+        -DLLVM_ENABLE_LIBXML2=OFF \
+        -DLLVM_ENABLE_TERMINFO=OFF \
+        -DLLVM_ENABLE_LIBEDIT=OFF \
+        -DLLVM_ENABLE_LIBPFM=OFF \
+        -DLLVM_INCLUDE_TESTS=OFF \
+        -DLLVM_INCLUDE_BENCHMARKS=OFF \
+        -DLLVM_INCLUDE_EXAMPLES=OFF \
+        -DCLANG_ENABLE_ARCMT=OFF \
+        -DCLANG_ENABLE_STATIC_ANALYZER=OFF \
+        -DLLVM_PARALLEL_COMPILE_JOBS=${COMPILE_JOBS} \
+        -DLLVM_PARALLEL_LINK_JOBS=${LINK_JOBS} \
+        -DCMAKE_EXE_LINKER_FLAGS="-static -static-libgcc -static-libstdc++" \
+ && ninja -C build clang
+
+# Resolve the real binary behind bin/clang (a symlink to clang-NN), strip it,
+# and prove it is both fully static and able to emit a BPF object before we
+# let it out of the build stage.
+RUN set -eux; \
+    real="$(readlink -f build/bin/clang)"; \
+    cp "$real" /clang; \
+    strip /clang; \
+    /clang --version; \
+    if readelf -l /clang | grep -q INTERP; then echo "ERROR: clang is not static"; exit 1; fi; \
+    echo "confirmed: no PT_INTERP -> fully static"; \
+    printf 'char _license[] __attribute__((section("license"))) = "GPL";\nint p(void*c){return 0;}\n' > /tmp/t.bpf.c; \
+    /clang -target bpf -O2 -g -mcpu=v3 -c /tmp/t.bpf.c -o /tmp/t.bpf.o; \
+    echo "confirmed: emitted $(wc -c < /tmp/t.bpf.o) byte BPF object"
+
+# Minimal stage holding only the binary, for `--output type=local`.
+FROM scratch AS export
+COPY --from=build /clang /clang

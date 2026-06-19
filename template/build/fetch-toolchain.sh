@@ -21,6 +21,19 @@ FILTER="$*"   # empty = all tools
 # shellcheck disable=SC1090
 . "$LOCK"
 
+# Apple/BSD report arm64; the release assets are named aarch64.
+[ "$ARCH" = arm64 ] && ARCH=aarch64
+
+# The binaries are Linux musl-static — they can't run on any other OS. Skip
+# cleanly there (exit 0) so callers fall back to host tools instead of failing.
+# Normally toolchain.mk already no-ops the fetch off-Linux; this guards direct
+# invocation too.
+OS="$(uname -s)"
+if [ "$OS" != Linux ]; then
+	echo "note: vendored toolchain is Linux-only; on $OS the build uses host tools on PATH" >&2
+	exit 0
+fi
+
 case "$ARCH" in
 	x86_64 | aarch64) ;;
 	*) echo "error: unsupported arch '$ARCH'" >&2; exit 1 ;;

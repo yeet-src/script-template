@@ -9,10 +9,23 @@
 # never the template version — so updating the template reuses an existing
 # cached toolchain, and bumping a tool adds a new entry beside the old one.
 # Falls back to host tools on PATH when no lock is present.
+#
+# The vendored binaries are Linux musl-static, so the cache is only used on
+# Linux. On any other host (macOS, BSD) we leave CLANG/BPFTOOL/ESBUILD/GIT
+# unset, falling through to host tools on PATH — macOS is an edit-here,
+# build-on-Linux host for BPF work.
 
+UNAME_S := $(shell uname -s)
 UNAME_M := $(shell uname -m)
+# Apple/BSD report arm64; the release assets are named aarch64. Normalize so
+# the cache key and asset names line up across hosts.
+UNAME_M := $(UNAME_M:arm64=aarch64)
 
+# Only engage the vendored cache on Linux; elsewhere TOOLCHAIN_LOCK stays empty
+# so the PATH fallbacks below win and the fetch targets become no-ops.
+ifeq ($(UNAME_S),Linux)
 TOOLCHAIN_LOCK := $(firstword $(wildcard build/toolchain.lock))
+endif
 ifneq ($(TOOLCHAIN_LOCK),)
   include $(TOOLCHAIN_LOCK)
   TOOLCHAIN_KEY  := v$(TOOLCHAIN_VERSION)
