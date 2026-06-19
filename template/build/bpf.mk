@@ -64,6 +64,25 @@ bin:
 clean-bpf:
 	rm -rf $(BPF_OUT) .build $(VMLINUX)
 
+# Load the linked object with veristat to confirm THIS kernel's verifier
+# accepts every program, and to see per-program complexity (insns/states) — a
+# local counterpart to the kernel-matrix CI, which runs the same check across
+# many kernels. Loading BPF programs needs privileges, so run with sudo (as
+# `yeet run` does). VERISTAT is resolved by build/toolchain.mk (the vendored
+# static binary, or `veristat` on PATH).
+.PHONY: veristat
+veristat: $(BPF_OUT) | toolchain
+	@command -v $(VERISTAT) >/dev/null 2>&1 || { echo "error: veristat not found ($(VERISTAT)) — bump build/toolchain.lock to a toolchain that ships veristat, or install veristat on PATH"; exit 1; }
+	$(VERISTAT) $(BPF_OUT)
+
+# Run the same verifier check across a matrix of kernels locally (Linux + KVM),
+# the local counterpart to .github/workflows/kernel-matrix.yml. Boots
+# quay.io/lvh-images/kind images with cilium's lvh + QEMU; pass kernels as
+# KERNELS="6.6-main bpf-next-main" or rely on the script's default spread.
+.PHONY: veristat-matrix
+veristat-matrix: $(BPF_OUT) | toolchain
+	VERISTAT="$(VERISTAT)" sh build/kernel-matrix.sh $(KERNELS)
+
 # Write a local .clangd so the editor resolves vmlinux.h, the libbpf SDK
 # headers and __u* types using the *resolved* toolchain include path — unlike
 # the committed .clangd (which only covers in-repo editing), this picks up the
