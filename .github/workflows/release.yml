@@ -58,7 +58,9 @@ jobs:
             *)          default_lvl=2   # mainline: unmarked -> minor
                         tagpat='^v[0-9]+\.[0-9]+(\.[0-9]+)?$' ;;
           esac
-          latest="$(git tag -l 'v[0-9]*' | grep -E "$tagpat" | sed 's/^v//' | sort -V | tail -1)"
+          # `|| true` so an empty tag set (no match) doesn't fail the pipeline
+          # under pipefail — that's the fresh-start case, which yields v0.1.0.
+          latest="$(git tag -l 'v[0-9]*' | { grep -E "$tagpat" || true; } | sed 's/^v//' | sort -V | tail -1)"
           if [ -z "$latest" ]; then
             next="0.1.0"
           else
