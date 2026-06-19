@@ -117,23 +117,15 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
+          # Mark the newest MAINLINE version as GitHub "Latest" so the stable
+          # .../releases/latest/download/<asset> URL tracks it (no separate
+          # rolling "latest" release — GitHub's built-in Latest is the single
+          # source of truth). A release/* back-port must NOT steal Latest from a
+          # newer mainline release, so it publishes with --latest=false.
+          if [ "${GITHUB_REF_NAME}" = master ]; then mk=--latest; else mk='--latest=false'; fi
           gh release create "${{ steps.version.outputs.tag }}" \
             "${{ steps.archive.outputs.asset }}" \
             --title "${{ steps.version.outputs.tag }}" \
             --notes "Repo snapshot of ${GITHUB_SHA}" \
-            --target "${GITHUB_SHA}"
-
-      - name: Update rolling "latest" release
-        # Only mainline moves "latest"; a release/* back-patch must not hijack
-        # the stable URL away from the newest master build.
-        if: steps.version.outputs.skip != 'true' && github.ref_name == 'master'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          # Move the rolling "latest" tag/release to this commit so the
-          # stable .../releases/latest/download/ URL tracks the newest build.
-          gh release delete latest --yes --cleanup-tag || true
-          gh release create latest "${{ steps.archive.outputs.asset }}" \
-            --title "latest" \
-            --notes "Repo snapshot of ${GITHUB_SHA} (${{ steps.version.outputs.tag }})" \
-            --target "${GITHUB_SHA}"
+            --target "${GITHUB_SHA}" \
+            "$mk"
