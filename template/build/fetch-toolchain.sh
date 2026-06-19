@@ -77,6 +77,7 @@ fetch_bin() {
 fetch_bin make
 fetch_bin clang
 fetch_bin bpftool
+fetch_bin veristat
 fetch_bin esbuild
 fetch_bin git
 
