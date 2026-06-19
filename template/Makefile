@@ -2,6 +2,7 @@
 #
 #   make         — build everything (BPF objects + JS bundle)
 #   make bpf     — compile bpf/*.bpf.c into bin/* only
+#   make veristat — load the built object with veristat (verifier check on this kernel)
 #   make bundle  — resolve npm/jsr deps and bundle the JS entry
 #   make postgen — finalize a freshly generated project (git init)
 #   make clangd  — write a local .clangd pointing at the resolved toolchain

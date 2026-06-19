@@ -50,6 +50,8 @@ src/lib/format.js     pure render helpers (rate, duration, heat color)
 src/bpf/cpusched.bpf.c  sched_switch program + the runtime knob
 src/bpf/runqlat.bpf.c   wakeup→on-CPU latency histogram
 bin/                  the linked BPF object lands here
+.github/workflows/kernel-matrix.yml  CI: verify the object across kernels
+build/verify-kernel.sh  the in-VM gate that workflow runs
 ```
 
 The JS is layered: `probes/` is the only BPF-aware code (it owns the object
@@ -82,6 +84,37 @@ const control = await probe
 `base: import.meta.dirname` resolves the path against the running bundle.
 `probe.data` is libbpf's name for this object's `.data` section (confirm with
 `bpftool btf dump file bin/probe.bpf.o` if you rename things).
+
+## Testing across kernels
+
+Run `make veristat` to load `bin/probe.bpf.o` with veristat on **your** kernel —
+a quick check that every program passes the verifier, plus per-program
+complexity (insns/states). It needs privileges to load programs, so use `sudo`.
+
+A BPF program that loads on your laptop can be rejected by an older kernel's
+verifier. `.github/workflows/kernel-matrix.yml` guards against that: for each
+kernel in its matrix it builds `bin/probe.bpf.o`, boots that kernel in a VM
+([cilium's little-vm-helper](https://github.com/cilium/little-vm-helper), images
+from `quay.io/lvh-images`), and runs the vendored static **veristat** against the
+object — failing the job if the verifier rejects any program. The check is
+`build/verify-kernel.sh`.
+
+Edit `matrix.kernel` to the kernels you care about (tags at
+[quay.io/lvh-images/kind](https://quay.io/repository/lvh-images/kind?tab=tags);
+`<ver>-main` tracks the newest build of each line). A program using a feature
+newer than a listed kernel will fail there by design — that failure *is* the
+signal of your minimum kernel.
+
+To run the same matrix **locally** (Linux + KVM), `make veristat-matrix` — it
+boots those kernel images with [`lvh`](https://github.com/cilium/little-vm-helper)
++ QEMU and prints an `ok`/`FAIL` grid. Pick kernels with
+`make veristat-matrix KERNELS="6.6-main bpf-next-main"`. Both `lvh` and a static
+`qemu` are fetched on demand (VM infra, not part of the build toolchain) — the
+vendored static qemu comes from the toolchain release, checksum-pinned in
+`build/toolchain.lock`, falling back to a system `qemu-system` if absent.
+
+> Requires a toolchain pin (`build/toolchain.lock`) that ships `veristat`; the
+> workflow says so explicitly if the pinned version predates it.
 
 `#/` (project root) and `@/` (source root) are **bundle-time aliases** that
 esbuild resolves via tsconfig `paths`; the runtime resolver doesn't know them,
