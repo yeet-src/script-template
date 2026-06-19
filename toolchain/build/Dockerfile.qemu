@@ -1,0 +1,133 @@
+# syntax=docker/dockerfile:1
+#
+# A fully-static, musl-linked qemu-system, cut down to just what cilium's lvh
+# drives for the kernel-matrix runner:
+#
+#   - one softmmu target (x86_64 or aarch64)         (-M virt / default pc)
+#   - KVM + TCG accelerators                          (-enable-kvm, tcg fallback)
+#   - slirp user networking                           (-netdev user,hostfwd=… → SSH)
+#   - virtfs / virtio-9p                              (-fsdev local → --host-mount)
+#   - virtio-blk / -net / -serial, headless           (-display none, -nodefaults)
+#
+# Everything else qemu can pull in (GTK/SDL/VNC/SPICE/curl/iscsi/rbd/…) is
+# disabled, so the link has almost nothing dynamic to want. The RESULT is not a
+# single file: the executable links statically, but a qemu-system still loads
+# firmware/ROM blobs (e.g. efi-virtio.rom for the NIC) from its datadir at
+# runtime — so the shippable artifact is "static binary + a small share/qemu
+# blob dir", exported here as a tree under /out.
+#
+# Build per-arch on a NATIVE runner (emulated qemu-compiling-qemu is brutal):
+#   docker buildx build --platform linux/arm64 -f Dockerfile.qemu \
+#     --build-arg QEMU_TARGET=aarch64-softmmu \
+#     --target export --output type=local,dest=./out .
+
+ARG ALPINE_TAG=alpine:3.21
+
+FROM ${ALPINE_TAG} AS build
+ARG QEMU_VERSION=9.1.2
+ARG QEMU_TARGET=aarch64-softmmu
+ARG LIBSLIRP_VERSION=4.8.0
+
+# Toolchain + the few libs our feature set actually needs, in BOTH dev and
+# static (.a) form so `--static` has archives to link against:
+#   glib  — qemu's hard dependency
+#   libcap-ng / attr — virtfs 'local' backend (9p host share)
+#   zlib / pixman / zstd — commonly required by the core even headless
+# (libslirp has no -static package on Alpine, so we build it from source below.)
+RUN apk add --no-cache \
+        bash perl python3 meson ninja gcc g++ make musl-dev linux-headers \
+        pkgconf bison flex curl xz tar binutils git \
+        glib-dev glib-static \
+        zlib-dev zlib-static \
+        pixman-dev pixman-static \
+        libcap-ng-dev libcap-ng-static \
+        attr-dev attr-static \
+        zstd-dev zstd-static \
+        gettext-static
+
+# Static libslirp from source (user-mode networking → the SSH port-forward).
+# Tiny meson project; install to /usr so qemu's pkg-config picks up the .a.
+WORKDIR /src
+RUN curl -fSL -o slirp.tar.gz \
+        "https://gitlab.freedesktop.org/slirp/libslirp/-/archive/v${LIBSLIRP_VERSION}/libslirp-v${LIBSLIRP_VERSION}.tar.gz" \
+ && tar xf slirp.tar.gz && rm slirp.tar.gz \
+ && cd "libslirp-v${LIBSLIRP_VERSION}" \
+ && meson setup _b --prefix=/usr --default-library=static --buildtype=release \
+ && ninja -C _b && ninja -C _b install
+
+WORKDIR /src
+RUN curl -fSL -o qemu.tar.xz "https://download.qemu.org/qemu-${QEMU_VERSION}.tar.xz" \
+ && tar xf qemu.tar.xz \
+ && rm qemu.tar.xz
+
+WORKDIR /src/qemu-${QEMU_VERSION}
+
+# qemu's virtfs probe #includes <attr/xattr.h>, which Alpine/musl dropped (the
+# xattr calls live in <sys/xattr.h> in libc now). Shim the old header so the
+# probe compiles and links straight against musl — no separate libattr needed.
+RUN mkdir -p /usr/include/attr \
+ && printf '#include <sys/xattr.h>\n' > /usr/include/attr/xattr.h
+
+# Start from nothing (--without-default-features) and switch on only the four
+# capabilities lvh uses. --enable-fdt=internal builds the bundled dtc so the
+# arm 'virt' machine works without a system libfdt.
+RUN ./configure \
+        --static \
+        --target-list="${QEMU_TARGET}" \
+        --without-default-features \
+        --enable-kvm \
+        --enable-tcg \
+        --enable-slirp \
+        --enable-virtfs \
+        --enable-attr \
+        --enable-fdt=internal \
+        --enable-pixman \
+        --disable-docs \
+        --disable-tools \
+        --disable-guest-agent \
+        --prefix=/usr/local \
+ && make -j"$(nproc)"
+
+# Resolve the built binary, strip it, prove it is fully static, then assemble a
+# MINIMAL shippable tree under /out: the binary + only the firmware/ROM blobs
+# the target machine actually loads. qemu installs ~280MB of blobs by default
+# (every board's BIOS/openbios/slof/u-boot/vgabios/PXE rom); lvh drives one
+# machine with direct -kernel boot, so almost none are needed —
+#   - aarch64 'virt': just the virtio-net NIC rom (direct kernel boot, no BIOS)
+#   - x86_64 'pc':    SeaBIOS + the -kernel loader rom + the virtio-net rom
+# The set is then SELF-CHECKED below: qemu is launched with this minimal -L and
+# lvh's device set, and the build fails if it reports a missing-firmware error.
+RUN set -eux; \
+    bin="$(find build -maxdepth 1 -type f -name 'qemu-system-*')"; name="$(basename "$bin")"; \
+    strip "$bin"; \
+    "./$bin" --version; \
+    if readelf -l "$bin" | grep -q INTERP; then echo "ERROR: $name is not static"; exit 1; fi; \
+    echo "confirmed: no PT_INTERP -> fully static"; \
+    make install DESTDIR=/full >/dev/null; \
+    DD=/full/usr/local/share/qemu; \
+    mkdir -p /out/bin /out/share/qemu; \
+    cp "$bin" /out/bin/; \
+    case "$name" in \
+      qemu-system-aarch64) MACH=virt; BLOBS="efi-virtio.rom" ;; \
+      qemu-system-x86_64)  MACH=pc;   BLOBS="bios-256k.bin kvmvapic.bin linuxboot_dma.bin efi-virtio.rom" ;; \
+      *) echo "ERROR: no minimal blob set defined for $name"; exit 1 ;; \
+    esac; \
+    for b in $BLOBS; do cp "$DD/$b" /out/share/qemu/; done; \
+    # Self-check: boot with the minimal -L and lvh's device set under TCG (no
+    # /dev/kvm in the builder). A missing romfile makes qemu exit !=0 before the
+    # main loop; a healthy boot just runs until `timeout` kills it (rc 124).
+    set +e; \
+    timeout 6 /out/bin/"$name" -M "$MACH" -accel tcg -display none -nodefaults \
+        -L /out/share/qemu -smp 1 -m 256 \
+        -netdev user,id=n0,hostfwd=tcp::2222-:22 -device virtio-net-pci,netdev=n0 \
+        -device virtio-serial-pci \
+        -fsdev local,id=h,path=/tmp,security_model=none -device virtio-9p-pci,fsdev=h,mount_tag=host_mount \
+        -serial null -monitor none 2>/tmp/qerr; \
+    rc=$?; set -e; \
+    if [ "$rc" != 124 ] && [ "$rc" != 0 ]; then echo "ERROR: minimal datadir insufficient (rc=$rc):"; cat /tmp/qerr; exit 1; fi; \
+    if grep -qiE 'romfile|option rom|could not (open|load).*\.(bin|rom|fd)' /tmp/qerr; then echo "ERROR: missing firmware:"; cat /tmp/qerr; exit 1; fi; \
+    echo "confirmed: minimal datadir sufficient for -M $MACH"; \
+    echo "=== shippable size ==="; du -sh /out/bin /out/share/qemu; ls -la /out/share/qemu
+
+FROM scratch AS export
+COPY --from=build /out /

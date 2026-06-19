@@ -7,10 +7,21 @@ name: vendor-toolchain
 # as version-addressed assets on the `toolchain` release, with checksums
 # recorded back into build/versions.env.
 #
+# To avoid burning an hour rebuilding clang on every change, the `detect` job
+# fingerprints each from-source tool's build inputs (its Dockerfile + the
+# version vars it consumes) against the previous release: a tool only rebuilds
+# when its inputs changed, otherwise its binary is reused from that release.
+# Tick `rebuild_all` on a manual run to force a full from-source rebuild.
+#
 # Run manually from the Actions tab, or by changing the build recipe.
 
 on:
   workflow_dispatch:
+    inputs:
+      rebuild_all:
+        description: 'Rebuild every tool from source (ignore change detection)'
+        type: boolean
+        default: false
   push:
     branches: [master]
     paths:
@@ -25,81 +36,148 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  clang:
+  detect:
+    runs-on: ubuntu-latest
+    outputs:
+      clang: ${{ steps.scan.outputs.clang }}
+      make: ${{ steps.scan.outputs.make }}
+      git: ${{ steps.scan.outputs.git }}
+      qemu: ${{ steps.scan.outputs.qemu }}
+      prevtag: ${{ steps.scan.outputs.prevtag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Decide which tools to (re)build
+        id: scan
+        env:
+          FORCE: ${{ github.event.inputs.rebuild_all }}
+        run: |
+          set -euo pipefail
+          # Previous published release (highest vX.Y tag), if any.
+          prev="$(git tag -l 'v[0-9]*.[0-9]*' | sed 's/^v//' \
+            | sort -t. -k1,1n -k2,2n | tail -1)"
+          prevtag=""
+          [ -n "$prev" ] && prevtag="v$prev"
+          echo "prevtag=$prevtag" >> "$GITHUB_OUTPUT"
+
+          # Read a source file either from the working tree ("WORK") or a git ref.
+          read_src() {  # ref path
+            if [ "$1" = WORK ]; then cat "$2"; else git show "$1:$2" 2>/dev/null || true; fi
+          }
+          # Fingerprint a from-source tool's build inputs: exactly what the Docker
+          # build consumes — its Dockerfile plus the version vars passed as
+          # build-args. We hash only those keys (not the whole versions.env), so
+          # CI's own checksum/version edits never masquerade as a real change.
+          fingerprint() {  # ref tool
+            case "$2" in
+              clang) df=build/Dockerfile.clang; keys="LLVM_VERSION ALPINE_TAG" ;;
+              make)  df=build/Dockerfile.make;  keys="MAKE_VERSION ALPINE_TAG" ;;
+              git)   df=build/Dockerfile.git;   keys="GIT_VERSION ALPINE_TAG" ;;
+              qemu)  df=build/Dockerfile.qemu;  keys="QEMU_VERSION LIBSLIRP_VERSION ALPINE_TAG" ;;
+            esac
+            env="$(read_src "$1" build/versions.env)"
+            { read_src "$1" "$df"
+              for k in $keys; do printf '%s\n' "$env" | grep "^$k=" || true; done
+            } | sha256sum | awk '{print $1}'
+          }
+
+          # A tool builds when forced, when there's no prior release to reuse
+          # from, or when its fingerprint differs from that release.
+          for tool in clang make git qemu; do
+            if [ "${FORCE:-false}" = true ] || [ -z "$prevtag" ] \
+               || [ "$(fingerprint WORK "$tool")" != "$(fingerprint "$prevtag" "$tool")" ]; then
+              echo "$tool=true"  >> "$GITHUB_OUTPUT"; echo "build  $tool"
+            else
+              echo "$tool=false" >> "$GITHUB_OUTPUT"; echo "reuse  $tool from $prevtag"
+            fi
+          done
+
+  build:
+    needs: detect
+    # One job per (tool, arch) so every tool builds on its own runner in
+    # parallel — the multi-hour clang build no longer blocks make/git/qemu, and
+    # each job is labelled for the tool it actually builds (e.g. "clang
+    # (x86_64)"). Wall-clock collapses from clang+make+git+qemu to ~max(tool).
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - platform: amd64
-            arch: x86_64
-            runner: ubuntu-latest
-          - platform: arm64
-            arch: aarch64
-            runner: ubuntu-24.04-arm
-    runs-on: ${{ matrix.runner }}
+        tool: [clang, make, git, qemu]
+        arch:
+          - { platform: amd64, name: x86_64, runner: ubuntu-latest }
+          - { platform: arm64, name: aarch64, runner: ubuntu-24.04-arm }
+    runs-on: ${{ matrix.arch.runner }}
+    name: ${{ matrix.tool }} (${{ matrix.arch.name }})
+    env:
+      GH_TOKEN: ${{ github.token }}
+      TOOL: ${{ matrix.tool }}
+      ARCH: ${{ matrix.arch.name }}
     steps:
       - uses: actions/checkout@v4
 
-      - name: Build static clang (${{ matrix.arch }})
+      - name: Build ${{ matrix.tool }} from source (${{ matrix.arch.name }})
+        if: needs.detect.outputs[matrix.tool] == 'true'
         run: |
           set -euo pipefail
           . build/versions.env
+          # Per-tool build-args. clang/make/git export a single static binary at
+          # out/<tool>; qemu exports a tree (out/bin + out/share/qemu) — a static
+          # qemu-system for the optional kernel-matrix runner, trimmed by its
+          # Dockerfile to the binary + the firmware blobs lvh's machine loads.
+          case "$TOOL" in
+            clang) args=(-f build/Dockerfile.clang
+                     --build-arg "LLVM_VERSION=${LLVM_VERSION}"
+                     --build-arg "ALPINE_TAG=${ALPINE_TAG}"
+                     --build-arg "COMPILE_JOBS=$(nproc)") ;;
+            make)  args=(-f build/Dockerfile.make
+                     --build-arg "MAKE_VERSION=${MAKE_VERSION}"
+                     --build-arg "ALPINE_TAG=${ALPINE_TAG}") ;;
+            git)   args=(-f build/Dockerfile.git
+                     --build-arg "GIT_VERSION=${GIT_VERSION}"
+                     --build-arg "ALPINE_TAG=${ALPINE_TAG}") ;;
+            qemu)  args=(-f build/Dockerfile.qemu
+                     --build-arg "QEMU_VERSION=${QEMU_VERSION}"
+                     --build-arg "QEMU_TARGET=${ARCH}-softmmu"
+                     --build-arg "LIBSLIRP_VERSION=${LIBSLIRP_VERSION}"
+                     --build-arg "ALPINE_TAG=${ALPINE_TAG}") ;;
+          esac
           docker buildx build \
-            --platform "linux/${{ matrix.platform }}" \
-            -f build/Dockerfile.clang \
-            --build-arg "LLVM_VERSION=${LLVM_VERSION}" \
-            --build-arg "ALPINE_TAG=${ALPINE_TAG}" \
-            --build-arg "COMPILE_JOBS=$(nproc)" \
+            --platform "linux/${{ matrix.arch.platform }}" \
+            "${args[@]}" \
             --target export \
             --output "type=local,dest=out" \
             build
 
-      - uses: actions/upload-artifact@v4
-        with:
-          name: clang-${{ matrix.arch }}
-          path: out/clang
-          if-no-files-found: error
-
-      - name: Build static make (${{ matrix.arch }})
+      - name: Reuse ${{ matrix.tool }} from ${{ needs.detect.outputs.prevtag }}
+        if: needs.detect.outputs[matrix.tool] != 'true'
         run: |
           set -euo pipefail
-          . build/versions.env
-          docker buildx build \
-            --platform "linux/${{ matrix.platform }}" \
-            -f build/Dockerfile.make \
-            --build-arg "MAKE_VERSION=${MAKE_VERSION}" \
-            --build-arg "ALPINE_TAG=${ALPINE_TAG}" \
-            --target export \
-            --output "type=local,dest=outmake" \
-            build
+          mkdir -p out
+          if [ "$TOOL" = qemu ]; then
+            # qemu rides the release as a per-arch tarball (binary + blobs);
+            # unpack it back into the bin/ + share/qemu/ tree the build emits.
+            gh release download "${{ needs.detect.outputs.prevtag }}" \
+              --repo "$GITHUB_REPOSITORY" -p "qemu-${ARCH}.tar.gz" -O qemu.tar.gz
+            tar -xzf qemu.tar.gz -C out
+          else
+            gh release download "${{ needs.detect.outputs.prevtag }}" \
+              --repo "$GITHUB_REPOSITORY" -p "${TOOL}-${ARCH}" -O "out/${TOOL}"
+            chmod +x "out/${TOOL}"
+          fi
 
       - uses: actions/upload-artifact@v4
         with:
-          name: make-${{ matrix.arch }}
-          path: outmake/make
-          if-no-files-found: error
-
-      - name: Build static git (${{ matrix.arch }})
-        run: |
-          set -euo pipefail
-          . build/versions.env
-          docker buildx build \
-            --platform "linux/${{ matrix.platform }}" \
-            -f build/Dockerfile.git \
-            --build-arg "GIT_VERSION=${GIT_VERSION}" \
-            --build-arg "ALPINE_TAG=${ALPINE_TAG}" \
-            --target export \
-            --output "type=local,dest=outgit" \
-            build
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: git-${{ matrix.arch }}
-          path: outgit/git
+          # Single binary for clang/make/git; the bin/+share tree for qemu.
+          # download-artifact restores this as artifacts/<tool>-<arch>/...,
+          # which is exactly what the vendor job assembles from.
+          name: ${{ matrix.tool }}-${{ matrix.arch.name }}
+          path: out
           if-no-files-found: error
 
   vendor:
-    needs: clang
+    needs: build
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -122,6 +200,8 @@ jobs:
           install -Dm755 artifacts/git-x86_64/git      x86_64/git
           install -Dm755 artifacts/git-aarch64/git     aarch64/git
           sh build/fetch-bpftool.sh
+          sh build/fetch-veristat.sh
+          sh build/fetch-lvh.sh
           sh build/fetch-esbuild.sh
           sh build/fetch-libbpf-headers.sh
           ls -la x86_64 aarch64 include/bpf
@@ -132,6 +212,18 @@ jobs:
           set -euo pipefail
           # Top-level bpf/ dir so a consumer extracts it as <include>/bpf/*.h.
           tar -czf libbpf-headers.tar.gz -C include bpf
+
+      - name: Build qemu tarballs
+        run: |
+          set -euo pipefail
+          # Pack each arch's qemu tree (bin/ + share/qemu/) so the matrix runner
+          # extracts it as <dest>/bin/qemu-system-<arch> with its blobs beside it
+          # (qemu finds its datadir relative to the binary). upload-artifact drops
+          # the exec bit, so restore it before tarring.
+          for a in x86_64 aarch64; do
+            chmod +x "artifacts/qemu-$a/bin/qemu-system-$a"
+            tar -czf "qemu-$a.tar.gz" -C "artifacts/qemu-$a" .
+          done
 
       - name: Compute next toolchain version
         run: |
@@ -156,7 +248,7 @@ jobs:
           # Record the checksum of every binary we publish, so a consumer
           # verifies the exact artifact it downloads from our release.
           for arch in x86_64 aarch64; do
-            for tool in clang make bpftool esbuild git; do
+            for tool in clang make bpftool veristat lvh esbuild git; do
               s="$(sha256sum "$arch/$tool" | awk '{print $1}')"
               key="$(echo "$tool" | tr a-z A-Z)_SHA256_${arch}"
               sed -i "s|^${key}=.*|${key}=${s}|" build/versions.env
@@ -164,6 +256,11 @@ jobs:
           done
           hsum="$(sha256sum libbpf-headers.tar.gz | awk '{print $1}')"
           sed -i "s|^LIBBPF_HEADERS_SHA256=.*|LIBBPF_HEADERS_SHA256=${hsum}|" build/versions.env
+          # qemu ships as a per-arch tarball (binary + blobs), so checksum the tarball.
+          for arch in x86_64 aarch64; do
+            qs="$(sha256sum "qemu-$arch.tar.gz" | awk '{print $1}')"
+            sed -i "s|^QEMU_SHA256_${arch}=.*|QEMU_SHA256_${arch}=${qs}|" build/versions.env
+          done
           grep -E '_SHA256_|^LIBBPF_HEADERS_SHA256=' build/versions.env
 
       - name: Tag immutable v${{ env.TC }} snapshot
@@ -198,11 +295,13 @@ jobs:
           # Consumers pin this one tag.
           mkdir -p dist
           for a in x86_64 aarch64; do
-            for t in clang make bpftool esbuild git; do cp "$a/$t" "dist/${t}-${a}"; done
+            for t in clang make bpftool veristat lvh esbuild git; do cp "$a/$t" "dist/${t}-${a}"; done
           done
           cp libbpf-headers.tar.gz dist/libbpf-headers.tar.gz
+          # qemu for the optional kernel-matrix runner (fetched on demand, not by `make`).
+          for a in x86_64 aarch64; do cp "qemu-$a.tar.gz" "dist/qemu-$a.tar.gz"; done
           gh release view "$tag" >/dev/null 2>&1 \
             || gh release create "$tag" --title "$tag" \
-                 --notes "Static build toolchain $tag — clang/make/git built from source; bpftool/esbuild/libbpf headers re-hosted."
+                 --notes "Static build toolchain $tag — clang/make/git built from source; bpftool/esbuild/libbpf headers re-hosted; qemu for the kernel-matrix runner."
           # --clobber so a same-version re-run refreshes assets.
           gh release upload "$tag" dist/* --clobber
