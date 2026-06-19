@@ -18,9 +18,10 @@ make sync-toolchain TOOLCHAIN_TAG=v0.8.0      # one rebase-mergeable commit; ope
 
 ## Releasing
 
-Every push to `master` publishes a versioned snapshot release and moves the
-rolling **`latest`** release (so `.../releases/latest/download/` always tracks
-the newest build). Versions are semver `vMAJOR.MINOR.PATCH`; CI picks the bump
+Every push to `master` publishes a versioned snapshot release and marks it
+GitHub **"Latest"**, so `.../releases/latest/download/<asset>` always tracks the
+newest build (no separate rolling tag — GitHub's built-in Latest is the single
+source of truth). Versions are semver `vMAJOR.MINOR.PATCH`; CI picks the bump
 from a `[bump:LEVEL]` marker in the commit **subject** (the body is free prose —
 put the marker on the subject line, like `[skip ci]`; for squash merges that's
 the PR title):
