@@ -1,0 +1,203 @@
+name: vendor-toolchain
+
+# Build and publish the static toolchain for x86_64 and aarch64: clang, make
+# and git are compiled from source on NATIVE runners per arch (no QEMU — the
+# multi-hour x86_64 LLVM build runs here in normal CI time), while bpftool,
+# esbuild and the libbpf headers are re-hosted from upstream. All are published
+# as version-addressed assets on the `toolchain` release, with checksums
+# recorded back into build/versions.env.
+#
+# Run manually from the Actions tab, or by changing the build recipe.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [master]
+    paths:
+      - 'build/**'
+      - '.github/workflows/vendor.yml'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: vendor-toolchain
+  cancel-in-progress: false
+
+jobs:
+  clang:
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: amd64
+            arch: x86_64
+            runner: ubuntu-latest
+          - platform: arm64
+            arch: aarch64
+            runner: ubuntu-24.04-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build static clang (${{ matrix.arch }})
+        run: |
+          set -euo pipefail
+          . build/versions.env
+          docker buildx build \
+            --platform "linux/${{ matrix.platform }}" \
+            -f build/Dockerfile.clang \
+            --build-arg "LLVM_VERSION=${LLVM_VERSION}" \
+            --build-arg "ALPINE_TAG=${ALPINE_TAG}" \
+            --build-arg "COMPILE_JOBS=$(nproc)" \
+            --target export \
+            --output "type=local,dest=out" \
+            build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: clang-${{ matrix.arch }}
+          path: out/clang
+          if-no-files-found: error
+
+      - name: Build static make (${{ matrix.arch }})
+        run: |
+          set -euo pipefail
+          . build/versions.env
+          docker buildx build \
+            --platform "linux/${{ matrix.platform }}" \
+            -f build/Dockerfile.make \
+            --build-arg "MAKE_VERSION=${MAKE_VERSION}" \
+            --build-arg "ALPINE_TAG=${ALPINE_TAG}" \
+            --target export \
+            --output "type=local,dest=outmake" \
+            build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: make-${{ matrix.arch }}
+          path: outmake/make
+          if-no-files-found: error
+
+      - name: Build static git (${{ matrix.arch }})
+        run: |
+          set -euo pipefail
+          . build/versions.env
+          docker buildx build \
+            --platform "linux/${{ matrix.platform }}" \
+            -f build/Dockerfile.git \
+            --build-arg "GIT_VERSION=${GIT_VERSION}" \
+            --build-arg "ALPINE_TAG=${ALPINE_TAG}" \
+            --target export \
+            --output "type=local,dest=outgit" \
+            build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: git-${{ matrix.arch }}
+          path: outgit/git
+          if-no-files-found: error
+
+  vendor:
+    needs: clang
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+
+      - name: Collect clang binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Assemble toolchain tree
+        run: |
+          set -euo pipefail
+          install -Dm755 artifacts/clang-x86_64/clang  x86_64/clang
+          install -Dm755 artifacts/clang-aarch64/clang aarch64/clang
+          install -Dm755 artifacts/make-x86_64/make    x86_64/make
+          install -Dm755 artifacts/make-aarch64/make   aarch64/make
+          install -Dm755 artifacts/git-x86_64/git      x86_64/git
+          install -Dm755 artifacts/git-aarch64/git     aarch64/git
+          sh build/fetch-bpftool.sh
+          sh build/fetch-esbuild.sh
+          sh build/fetch-libbpf-headers.sh
+          ls -la x86_64 aarch64 include/bpf
+          file x86_64/* aarch64/* || true
+
+      - name: Build libbpf-headers tarball
+        run: |
+          set -euo pipefail
+          # Top-level bpf/ dir so a consumer extracts it as <include>/bpf/*.h.
+          tar -czf libbpf-headers.tar.gz -C include bpf
+
+      - name: Compute next toolchain version
+        run: |
+          set -euo pipefail
+          # Highest existing vX.Y tag + 0.1 (tenths to avoid float drift);
+          # first publish is v0.1. Each publish is an immutable release.
+          latest="$(git tag -l 'v[0-9]*.[0-9]*' | sed 's/^v//' \
+            | sort -t. -k1,1n -k2,2n | tail -1)"
+          if [ -z "$latest" ]; then
+            next="0.1"
+          else
+            tenths=$(( $(echo "$latest" | awk -F. '{print $1*10 + $2}') + 1 ))
+            next="$(( tenths / 10 )).$(( tenths % 10 ))"
+          fi
+          echo "TC=$next" >> "$GITHUB_ENV"
+          sed -i "s|^TOOLCHAIN_VERSION=.*|TOOLCHAIN_VERSION=${next}|" build/versions.env
+          echo "next toolchain version: v${next}"
+
+      - name: Record checksums in versions.env
+        run: |
+          set -euo pipefail
+          # Record the checksum of every binary we publish, so a consumer
+          # verifies the exact artifact it downloads from our release.
+          for arch in x86_64 aarch64; do
+            for tool in clang make bpftool esbuild git; do
+              s="$(sha256sum "$arch/$tool" | awk '{print $1}')"
+              key="$(echo "$tool" | tr a-z A-Z)_SHA256_${arch}"
+              sed -i "s|^${key}=.*|${key}=${s}|" build/versions.env
+            done
+          done
+          hsum="$(sha256sum libbpf-headers.tar.gz | awk '{print $1}')"
+          sed -i "s|^LIBBPF_HEADERS_SHA256=.*|LIBBPF_HEADERS_SHA256=${hsum}|" build/versions.env
+          grep -E '_SHA256_|^LIBBPF_HEADERS_SHA256=' build/versions.env
+
+      - name: Publish v${{ env.TC }} release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="v${TC}"
+          # Immutable, version-tagged release; the tag carries the version, so
+          # assets are plain-named (<tool>-<arch>). Consumers pin this one tag.
+          mkdir -p dist
+          for a in x86_64 aarch64; do
+            for t in clang make bpftool esbuild git; do cp "$a/$t" "dist/${t}-${a}"; done
+          done
+          cp libbpf-headers.tar.gz dist/libbpf-headers.tar.gz
+          gh release view "$tag" >/dev/null 2>&1 \
+            || gh release create "$tag" --title "$tag" \
+                 --notes "Static build toolchain $tag — clang/make/git built from source; bpftool/esbuild/libbpf headers re-hosted."
+          # --clobber so a same-version re-run refreshes assets.
+          gh release upload "$tag" dist/* --clobber
+
+      - name: Commit headers + recorded checksums
+        run: |
+          set -euo pipefail
+          # Binaries are NOT committed — they are published as release assets
+          # above and fetched into the per-machine cache. Only the SDK headers
+          # and the recorded checksums land in git (x86_64/ and aarch64/ are
+          # gitignored).
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add include build/versions.env
+          if git diff --cached --quiet; then
+            echo "no changes to commit"
+          else
+            git commit -m "toolchain v${TC}: record version, checksums + headers"
+            git push
+          fi

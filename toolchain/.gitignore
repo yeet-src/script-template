@@ -1,0 +1,5 @@
+# Built binaries are published as release assets + fetched into the per-machine
+# cache, never committed. The build recipe (build/), the libbpf SDK headers
+# (include/), and the consumer glue (consumer/) are tracked.
+/x86_64/
+/aarch64/
