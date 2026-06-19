@@ -1,19 +1,41 @@
-name: release-latest
+name: release
+
+# Snapshot the template on every push to master (and to release/* maintenance
+# lines) as a versioned GitHub release, plus a rolling "latest" that the stable
+# .../releases/latest/download/ URL tracks.
+#
+# Versions are semver vMAJOR.MINOR.PATCH. The bump is the HIGHEST level any
+# commit since the last release asks for, via a [bump:*] marker in its SUBJECT
+# (see the markers check in commit-convention.yml):
+#   * [bump:major]   -> major  (X+1.0.0)
+#   * [bump:minor]   -> minor  (X.Y+1.0)
+#   * [bump:patch]   -> patch  (X.Y.Z+1)
+# An UNMARKED commit takes the branch default: minor on master, patch on a
+# release/* maintenance branch (where you're back-patching, and a minor could
+# collide with a mainline tag). Pre-semver tags (vX.Y two-component) read as
+# X.Y.0; the first publish ever is v0.1.0.
 
 on:
   push:
-    branches: [master]
+    branches:
+      - master
+      - 'release/*'
+  workflow_dispatch:
 
-# Allow the workflow to create/update releases and tags.
 permissions:
   contents: write
 
 concurrency:
-  group: release-latest
+  # Per-ref: a release/* back-patch never queues behind a master build.
+  group: release-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
-  archive:
+  release:
+    # Don't publish on branch creation (e.g. opening a release/* line at an
+    # existing release commit) — there are no new commits to release, and it
+    # would otherwise fall through to a spurious bump.
+    if: ${{ github.event_name != 'push' || !github.event.created }}
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -25,23 +47,53 @@ jobs:
       - name: Compute next version
         id: version
         run: |
-          # Find the highest existing vX.Y tag and bump by 0.1 (working in
-          # tenths to avoid float drift). First release is v0.1.
-          latest="$(git tag -l 'v[0-9]*.[0-9]*' \
-            | sed 's/^v//' \
-            | sort -t. -k1,1n -k2,2n \
-            | tail -1)"
+          set -euo pipefail
+          # Select the baseline by tag NAME: a release/vX.Y branch sees only its
+          # X.Y line, master (or any other ref) sees all clean tags globally.
+          # The rolling "latest" tag and any suffixed tag are excluded.
+          case "${GITHUB_REF_NAME:-}" in
+            release/v*) default_lvl=1   # maintenance line: unmarked -> patch
+                        mm="$(printf '%s' "${GITHUB_REF_NAME#release/v}" | cut -d. -f1,2 | sed 's/[.]/\\./g')"
+                        tagpat="^v${mm}(\.[0-9]+)?$" ;;
+            *)          default_lvl=2   # mainline: unmarked -> minor
+                        tagpat='^v[0-9]+\.[0-9]+(\.[0-9]+)?$' ;;
+          esac
+          latest="$(git tag -l 'v[0-9]*' | grep -E "$tagpat" | sed 's/^v//' | sort -V | tail -1)"
           if [ -z "$latest" ]; then
-            next="0.1"
+            next="0.1.0"
           else
-            tenths=$(( $(echo "$latest" | awk -F. '{print $1*10 + $2}') + 1 ))
-            next="$(( tenths / 10 )).$(( tenths % 10 ))"
+            # No new commits since this line's latest release => nothing to do.
+            commits="$(git rev-list "v${latest}..HEAD")"
+            if [ -z "$commits" ]; then
+              echo "no new commits since v${latest} — nothing to release"
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            maj=$(echo "$latest" | awk -F. '{print $1+0}')
+            min=$(echo "$latest" | awk -F. '{print $2+0}')
+            pat=$(echo "$latest" | awk -F. '{print $3+0}')   # missing patch -> 0
+            rank=0   # highest level seen: 1=patch 2=minor 3=major
+            while IFS= read -r sha; do
+              [ -n "$sha" ] || continue
+              msg="$(git log -1 --format=%s "$sha")"   # subject line only
+              if   printf '%s' "$msg" | grep -qi '\[bump:major\]'; then lvl=3
+              elif printf '%s' "$msg" | grep -qi '\[bump:minor\]'; then lvl=2
+              elif printf '%s' "$msg" | grep -qi '\[bump:patch\]'; then lvl=1
+              else lvl=$default_lvl; fi
+              [ "$lvl" -gt "$rank" ] && rank=$lvl
+            done <<< "$commits"
+            case "$rank" in
+              3) next="$((maj + 1)).0.0" ;;
+              2) next="${maj}.$((min + 1)).0" ;;
+              1) next="${maj}.${min}.$((pat + 1))" ;;
+            esac
           fi
           echo "tag=v${next}" >> "$GITHUB_OUTPUT"
           echo "Next version: v${next}"
 
       - name: Create repo archive
         id: archive
+        if: steps.version.outputs.skip != 'true'
         run: |
           # Pack the working tree (minus .git) into a zstd-compressed tarball.
           # The static toolchain lives in its own repo (yeet-src/toolchain) and
@@ -59,6 +111,7 @@ jobs:
           echo "asset=${RUNNER_TEMP}/${repo}.tar.zst" >> "$GITHUB_OUTPUT"
 
       - name: Publish versioned release
+        if: steps.version.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -69,6 +122,9 @@ jobs:
             --target "${GITHUB_SHA}"
 
       - name: Update rolling "latest" release
+        # Only mainline moves "latest"; a release/* back-patch must not hijack
+        # the stable URL away from the newest master build.
+        if: steps.version.outputs.skip != 'true' && github.ref_name == 'master'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
