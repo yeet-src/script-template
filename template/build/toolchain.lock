@@ -5,7 +5,7 @@
 # release `v<TOOLCHAIN_VERSION>` holding the whole set; consumers pin this one
 # number, and the cache is keyed by it (cache/yeet/toolchain/v<N>/<arch>/). CI
 # bumps it by 0.1 on every publish (which only happens when build/ changes).
-TOOLCHAIN_VERSION=0.1
+TOOLCHAIN_VERSION=0.3
 
 # Where a consumer fetches assets from: the version-tagged release. The fetch
 # appends `/v<TOOLCHAIN_VERSION>/<tool>-<arch>`.
@@ -27,7 +27,7 @@ CLANG_SHA256_aarch64=105fb2d324095127a127bcba56702a86229ed8892ce6429802d30585fa2
 BPFTOOL_VERSION=7.7.0
 BPFTOOL_SHA256_x86_64=74bd16335aa1c40714fb50287a42766c6faa4958f969cce32fef89485ce4934c
 BPFTOOL_SHA256_aarch64=2b3fc4dd5e4e40bd8d670c5f1fa9693b3f879a122c0f6a3eb806dfc6735da6b7
-LIBBPF_HEADERS_SHA256=f19af8beb34b8274890ca30821eccaced42083c2a923853a73e76cca9bbf4625
+LIBBPF_HEADERS_SHA256=bd0f88dbf44ec9bff33fba039bc824e48bdd5f35b7217e510fffe1623a7cb648
 
 # GNU make — the build driver. Built static from source (tiny, fast). Since
 # make can't fetch itself, `yeet build` bootstraps it into the cache at the
