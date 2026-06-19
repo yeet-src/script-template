@@ -13,7 +13,11 @@ name: vendor-toolchain
 # when its inputs changed, otherwise its binary is reused from that release.
 # Tick `rebuild_all` on a manual run to force a full from-source rebuild.
 #
-# Run manually from the Actions tab, or by changing the build recipe.
+# Run manually from the Actions tab (pick the branch), or by changing the build
+# recipe on master or a release/* maintenance branch. A push to release/* cuts a
+# back-patch: the version is computed from the highest tag reachable on THAT
+# branch, so a fix on release/0.6 (forked at v0.6.0) publishes v0.6.1 even while
+# master is already on v0.8 — see "Compute next toolchain version" below.
 
 on:
   workflow_dispatch:
@@ -22,8 +26,14 @@ on:
         description: 'Rebuild every tool from source (ignore change detection)'
         type: boolean
         default: false
+      flavor:
+        description: 'Optional variant suffix (e.g. asan, debug, musl). Publishes vX.Y.Z-<flavor> off the latest clean release with NO version bump. Leave empty for a normal release.'
+        type: string
+        default: ''
   push:
-    branches: [master]
+    branches:
+      - master
+      - 'release/*'
     paths:
       - 'build/**'
       - '.github/workflows/vendor.yml'
@@ -32,11 +42,17 @@ permissions:
   contents: write
 
 concurrency:
-  group: vendor-toolchain
+  # Per-ref: a release/* back-patch never queues behind a master build — each
+  # cuts its own line's tag, so they can publish in parallel.
+  group: vendor-toolchain-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
   detect:
+    # Don't publish on branch creation: pushing a new release/* branch at an
+    # existing release commit has no new commits to release (it would otherwise
+    # cut a spurious version). Manual dispatch and normal pushes still run.
+    if: ${{ github.event_name != 'push' || !github.event.created }}
     runs-on: ubuntu-latest
     outputs:
       clang: ${{ steps.scan.outputs.clang }}
@@ -56,9 +72,19 @@ jobs:
           FORCE: ${{ github.event.inputs.rebuild_all }}
         run: |
           set -euo pipefail
-          # Previous published release (highest vX.Y tag), if any.
-          prev="$(git tag -l 'v[0-9]*.[0-9]*' | sed 's/^v//' \
-            | sort -t. -k1,1n -k2,2n | tail -1)"
+          # Previous published release on THIS line. Release tags point at
+          # DETACHED lock-commits (vendor pushes only the tag, never the
+          # protected branch), so we can't select by git reachability — we
+          # select by tag NAME. On a release/vX.Y branch, restrict to that
+          # X.Y line's tags; on master (or any other ref) use all clean tags
+          # globally. Suffixed tags (vX.Y.Z-<flavor>) are unordered variants
+          # and excluded either way.
+          case "${GITHUB_REF_NAME:-}" in
+            release/v*) mm="$(printf '%s' "${GITHUB_REF_NAME#release/v}" | cut -d. -f1,2 | sed 's/[.]/\\./g')"
+                        tagpat="^v${mm}(\.[0-9]+)?$" ;;
+            *)          tagpat='^v[0-9]+\.[0-9]+(\.[0-9]+)?$' ;;
+          esac
+          prev="$(git tag -l 'v[0-9]*' | grep -E "$tagpat" | sed 's/^v//' | sort -V | tail -1)"
           prevtag=""
           [ -n "$prev" ] && prevtag="v$prev"
           echo "prevtag=$prevtag" >> "$GITHUB_OUTPUT"
@@ -67,10 +93,23 @@ jobs:
           read_src() {  # ref path
             if [ "$1" = WORK ]; then cat "$2"; else git show "$1:$2" 2>/dev/null || true; fi
           }
+          # Normalise a Dockerfile for fingerprinting: drop blank lines and
+          # full-line comments (in a Dockerfile only a line-leading '#' is a
+          # comment; inline '#' is part of the instruction) so doc-only edits
+          # don't force a rebuild. Parser directives (# syntax=, # escape=) are
+          # build-significant, so keep them.
+          norm_df() {
+            awk '{ low = tolower($0) }
+                 low ~ /^[[:space:]]*#[[:space:]]*(syntax|escape)=/ { print; next }
+                 /^[[:space:]]*#/                                   { next }
+                 /^[[:space:]]*$/                                   { next }
+                 { print }'
+          }
           # Fingerprint a from-source tool's build inputs: exactly what the Docker
-          # build consumes — its Dockerfile plus the version vars passed as
-          # build-args. We hash only those keys (not the whole versions.env), so
-          # CI's own checksum/version edits never masquerade as a real change.
+          # build consumes — its Dockerfile (sans comments/blanks) plus the
+          # version vars passed as build-args. We hash only those keys (not the
+          # whole versions.env), so CI's own checksum/version edits never
+          # masquerade as a real change.
           fingerprint() {  # ref tool
             case "$2" in
               clang) df=build/Dockerfile.clang; keys="LLVM_VERSION ALPINE_TAG" ;;
@@ -79,7 +118,7 @@ jobs:
               qemu)  df=build/Dockerfile.qemu;  keys="QEMU_VERSION LIBSLIRP_VERSION ALPINE_TAG" ;;
             esac
             env="$(read_src "$1" build/versions.env)"
-            { read_src "$1" "$df"
+            { read_src "$1" "$df" | norm_df
               for k in $keys; do printf '%s\n' "$env" | grep "^$k=" || true; done
             } | sha256sum | awk '{print $1}'
           }
@@ -176,8 +215,39 @@ jobs:
           path: out
           if-no-files-found: error
 
+  fetch:
+    # Re-hosted tools: each fetch-<tool>.sh just downloads a prebuilt static
+    # binary from upstream (no compile), so these run in parallel with the
+    # from-source build matrix and each gets its own pass/fail status. No
+    # change-detection — the scripts always pull fresh and vendor records the
+    # checksum every run. All run on an amd64 runner: the scripts download or
+    # extract the target-arch binary without executing it (lvh extracts
+    # cross-arch via `docker create --platform`), so no arm runner is needed.
+    strategy:
+      fail-fast: false
+      matrix:
+        tool: [bpftool, veristat, lvh, esbuild]
+        arch:
+          - { platform: amd64, name: x86_64 }
+          - { platform: arm64, name: aarch64 }
+    runs-on: ubuntu-latest
+    name: ${{ matrix.tool }} (${{ matrix.arch.name }})
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fetch ${{ matrix.tool }} (${{ matrix.arch.name }})
+        run: sh build/fetch-${{ matrix.tool }}.sh ${{ matrix.arch.platform }}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          # Restored by vendor as artifacts/<tool>-<arch>/<tool>, same layout as
+          # the from-source build artifacts so vendor assembles them uniformly.
+          name: ${{ matrix.tool }}-${{ matrix.arch.name }}
+          path: ${{ matrix.arch.name }}/${{ matrix.tool }}
+          if-no-files-found: error
+
   vendor:
-    needs: build
+    needs: [build, fetch]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -185,7 +255,7 @@ jobs:
           fetch-depth: 0
           fetch-tags: true
 
-      - name: Collect clang binaries
+      - name: Download all build + fetch artifacts
         uses: actions/download-artifact@v4
         with:
           path: artifacts
@@ -193,16 +263,17 @@ jobs:
       - name: Assemble toolchain tree
         run: |
           set -euo pipefail
-          install -Dm755 artifacts/clang-x86_64/clang  x86_64/clang
-          install -Dm755 artifacts/clang-aarch64/clang aarch64/clang
-          install -Dm755 artifacts/make-x86_64/make    x86_64/make
-          install -Dm755 artifacts/make-aarch64/make   aarch64/make
-          install -Dm755 artifacts/git-x86_64/git      x86_64/git
-          install -Dm755 artifacts/git-aarch64/git     aarch64/git
-          sh build/fetch-bpftool.sh
-          sh build/fetch-veristat.sh
-          sh build/fetch-lvh.sh
-          sh build/fetch-esbuild.sh
+          # Every single-binary tool — from-source (clang/make/git) and
+          # re-hosted (bpftool/veristat/lvh/esbuild) — arrives as the artifact
+          # <tool>-<arch> holding one file, so install them all the same way.
+          # qemu is the exception (a bin/+share tree), packed separately below.
+          for a in x86_64 aarch64; do
+            for t in clang make git bpftool veristat lvh esbuild; do
+              install -Dm755 "artifacts/${t}-${a}/${t}" "${a}/${t}"
+            done
+          done
+          # libbpf headers stay inline: arch-independent, and vendor commits
+          # include/ into the version tag below, so they must land in the tree.
           sh build/fetch-libbpf-headers.sh
           ls -la x86_64 aarch64 include/bpf
           file x86_64/* aarch64/* || true
@@ -226,23 +297,84 @@ jobs:
           done
 
       - name: Compute next toolchain version
+        id: ver
+        env:
+          FLAVOR: ${{ github.event.inputs.flavor }}
         run: |
           set -euo pipefail
-          # Highest existing vX.Y tag + 0.1 (tenths to avoid float drift);
-          # first publish is v0.1. Each publish is an immutable release.
-          latest="$(git tag -l 'v[0-9]*.[0-9]*' | sed 's/^v//' \
-            | sort -t. -k1,1n -k2,2n | tail -1)"
-          if [ -z "$latest" ]; then
-            next="0.1"
+          # Releases are semver vMAJOR.MINOR.PATCH, one immutable release each.
+          # The bump is the HIGHEST level any commit since the previous release
+          # on THIS line (latest..HEAD) asks for, via a marker in its SUBJECT:
+          #   * [bump:major]   -> major  (X+1.0.0)
+          #   * [bump:minor]   -> minor  (X.Y+1.0)
+          #   * [bump:patch]   -> patch  (X.Y.Z+1)
+          # An UNMARKED commit takes the branch default: minor on master, patch
+          # on a release/* maintenance branch (where you're almost always
+          # back-patching, and a minor bump could collide with a mainline tag).
+          # "latest" is the highest tag on THIS line, selected by NAME (release
+          # tags are detached lock-commits, so reachability can't be used): a
+          # release/vX.Y branch sees only its X.Y line, master sees all clean
+          # tags. So a back-patch on release/v0.6 bumps the 0.6 line, not
+          # master's. The PR check (commit-convention.yml) rejects malformed
+          # markers before merge. Pre-semver tags (v0.1..v0.5) read as 0.MINOR.0;
+          # the first publish ever is v0.1.0.
+          case "${GITHUB_REF_NAME:-}" in
+            release/v*) default_lvl=1   # maintenance line: unmarked -> patch
+                        mm="$(printf '%s' "${GITHUB_REF_NAME#release/v}" | cut -d. -f1,2 | sed 's/[.]/\\./g')"
+                        tagpat="^v${mm}(\.[0-9]+)?$" ;;
+            *)          default_lvl=2   # mainline: unmarked -> minor
+                        tagpat='^v[0-9]+\.[0-9]+(\.[0-9]+)?$' ;;
+          esac
+          # Clean tags on this line only; suffixed tags (vX.Y.Z-<flavor>) are
+          # unordered variants and never advance the line.
+          latest="$(git tag -l 'v[0-9]*' | grep -E "$tagpat" | sed 's/^v//' | sort -V | tail -1)"
+          flavor="${FLAVOR:-}"
+          if [ -n "$flavor" ]; then
+            # A flavor build is an unordered VARIANT of an existing release: it
+            # pins to the latest clean release reachable and appends the suffix,
+            # WITHOUT bumping the line (so it never becomes a baseline above).
+            # Dispatch-only; consumers opt in by pinning vX.Y.Z-<flavor>.
+            echo "$flavor" | grep -qE '^[a-z0-9][a-z0-9.]*$' \
+              || { echo "::error::flavor must match ^[a-z0-9][a-z0-9.]*$ (got '$flavor')"; exit 1; }
+            [ -n "$latest" ] || { echo "::error::no clean vX.Y.Z release to flavor yet"; exit 1; }
+            next="${latest}-${flavor}"
+          elif [ -z "$latest" ]; then
+            next="0.1.0"
           else
-            tenths=$(( $(echo "$latest" | awk -F. '{print $1*10 + $2}') + 1 ))
-            next="$(( tenths / 10 )).$(( tenths % 10 ))"
+            # No new commits since this line's latest release => nothing to
+            # publish. Skip cleanly (the later steps are gated on ver.skip) so a
+            # no-op trigger can't fall through to a bump.
+            commits="$(git rev-list "v${latest}..HEAD")"
+            if [ -z "$commits" ]; then
+              echo "no new commits since v${latest} — nothing to release"
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            maj=$(echo "$latest" | awk -F. '{print $1+0}')
+            min=$(echo "$latest" | awk -F. '{print $2+0}')
+            pat=$(echo "$latest" | awk -F. '{print $3+0}')   # missing patch -> 0
+            rank=0   # highest level seen: 1=patch 2=minor 3=major
+            while IFS= read -r sha; do
+              [ -n "$sha" ] || continue
+              msg="$(git log -1 --format=%s "$sha")"   # subject line only
+              if   printf '%s' "$msg" | grep -qi '\[bump:major\]'; then lvl=3
+              elif printf '%s' "$msg" | grep -qi '\[bump:minor\]'; then lvl=2
+              elif printf '%s' "$msg" | grep -qi '\[bump:patch\]'; then lvl=1
+              else lvl=$default_lvl; fi
+              [ "$lvl" -gt "$rank" ] && rank=$lvl
+            done <<< "$commits"
+            case "$rank" in
+              3) next="$((maj + 1)).0.0" ;;
+              2) next="${maj}.$((min + 1)).0" ;;
+              1) next="${maj}.${min}.$((pat + 1))" ;;
+            esac
           fi
           echo "TC=$next" >> "$GITHUB_ENV"
           sed -i "s|^TOOLCHAIN_VERSION=.*|TOOLCHAIN_VERSION=${next}|" build/versions.env
           echo "next toolchain version: v${next}"
 
       - name: Record checksums in versions.env
+        if: steps.ver.outputs.skip != 'true'
         run: |
           set -euo pipefail
           # Record the checksum of every binary we publish, so a consumer
@@ -264,6 +396,7 @@ jobs:
           grep -E '_SHA256_|^LIBBPF_HEADERS_SHA256=' build/versions.env
 
       - name: Tag immutable v${{ env.TC }} snapshot
+        if: steps.ver.outputs.skip != 'true'
         run: |
           set -euo pipefail
           tag="v${TC}"
@@ -285,6 +418,7 @@ jobs:
           fi
 
       - name: Publish v${{ env.TC }} release
+        if: steps.ver.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -300,8 +434,34 @@ jobs:
           cp libbpf-headers.tar.gz dist/libbpf-headers.tar.gz
           # qemu for the optional kernel-matrix runner (fetched on demand, not by `make`).
           for a in x86_64 aarch64; do cp "qemu-$a.tar.gz" "dist/qemu-$a.tar.gz"; done
+          # Flavored tags (vX.Y.Z-<flavor>) are opt-in variants — mark them
+          # prerelease so GitHub never surfaces one as "Latest".
+          prerelease=""; case "$tag" in *-*) prerelease="--prerelease" ;; esac
           gh release view "$tag" >/dev/null 2>&1 \
-            || gh release create "$tag" --title "$tag" \
+            || gh release create "$tag" --title "$tag" $prerelease \
                  --notes "Static build toolchain $tag — clang/make/git built from source; bpftool/esbuild/libbpf headers re-hosted; qemu for the kernel-matrix runner."
           # --clobber so a same-version re-run refreshes assets.
           gh release upload "$tag" dist/* --clobber
+
+      - name: Open maintenance branch for a new minor/major line
+        if: steps.ver.outputs.skip != 'true' && github.ref_name == 'master'
+        run: |
+          set -euo pipefail
+          # When master cuts a NEW line (vX.Y.0), fork release/vX.Y at the same
+          # immutable commit so future back-ports have somewhere to land.
+          # Patches (vX.Y.Z, Z>0) and flavor builds (vX.Y.Z-<flavor>) don't open
+          # a line. Creating the branch is safe: the branch-creation push is
+          # ignored by the detect guard, so it won't cut a spurious release.
+          ver="${TC}"
+          case "$ver" in *-*) echo "flavor build ($ver) — no maintenance branch"; exit 0 ;; esac
+          if [ "${ver##*.}" != 0 ]; then echo "patch release ($ver) — no new line"; exit 0; fi
+          br="release/v${ver%.*}"   # release/vX.Y
+          if git ls-remote --exit-code --heads origin "$br" >/dev/null 2>&1; then
+            echo "$br already exists — leaving it"; exit 0
+          fi
+          # HEAD is the immutable lock commit the v${ver} tag points at.
+          if git push origin "HEAD:refs/heads/${br}"; then
+            echo "opened maintenance branch ${br} at $(git rev-parse --short HEAD)"
+          else
+            echo "::warning::could not open ${br} (ruleset/permissions?) — create it manually if a back-port is needed"
+          fi
