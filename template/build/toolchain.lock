@@ -7,7 +7,7 @@
 # sets it to the next semver tag it computes from the [bump:*] commit markers
 # (default minor; see the README). A release is cut only when build/ or the
 # vendor workflow changes.
-TOOLCHAIN_VERSION=0.8.0
+TOOLCHAIN_VERSION=0.10.0
 
 # Where a consumer fetches assets from: the version-tagged release. The fetch
 # appends `/v<TOOLCHAIN_VERSION>/<tool>-<arch>`.
@@ -29,7 +29,7 @@ CLANG_SHA256_aarch64=105fb2d324095127a127bcba56702a86229ed8892ce6429802d30585fa2
 BPFTOOL_VERSION=7.7.0
 BPFTOOL_SHA256_x86_64=74bd16335aa1c40714fb50287a42766c6faa4958f969cce32fef89485ce4934c
 BPFTOOL_SHA256_aarch64=2b3fc4dd5e4e40bd8d670c5f1fa9693b3f879a122c0f6a3eb806dfc6735da6b7
-LIBBPF_HEADERS_SHA256=dba9a3583076fce1ab2739b6edba1460f64327accda449202892108e9d1a3c65
+LIBBPF_HEADERS_SHA256=d712858662168e4e04cdc35e4a962a6056c429ed57461b974ec59b819c60e3c3
 
 # veristat — BPF verifier statistics tool, used to check that built `*.bpf.o`
 # programs load and to track verifier complexity. Official static binary from
@@ -61,6 +61,14 @@ ESBUILD_VERSION=0.28.1
 ESBUILD_SHA256_x86_64=0c6588b092a2c291a72bab90659f3c9e0e25e0fe59c9ac12b4dae4d945e5548c
 ESBUILD_SHA256_aarch64=51e829ba36f36be6d9aea6e329ddc4f9350302339b16aaca96a3cb97f64a8ebb
 
+# gh — the GitHub CLI, for release/PR automation (CI and consumer tooling).
+# Official static (Go) binary from cli/cli, re-hosted on our "toolchain"
+# release like esbuild. CI records the per-arch binary checksum (consumers
+# verify the binary, not the upstream tarball).
+GH_VERSION=2.95.0
+GH_SHA256_x86_64=62c11fbaa08835168c3d1acf8a645ac6268a13a5682c73581388c9df0c622617
+GH_SHA256_aarch64=706b030846db08d0dac0392d6f74416e0bbf0d9ac5ecbd54c9046305c10eac59
+
 # qemu — NOT part of the build toolchain: a fully-static qemu-system for the
 # optional kernel-matrix test runner (boots lvh kernel images). Built per-arch
 # from source (see Dockerfile.qemu / build-qemu.sh), trimmed to the binary plus
@@ -81,8 +89,8 @@ LVH_SHA256_x86_64=ca3b958ffc08a4b65e4c6c8d29a4dad077acd11f146bc84f75a30ecaa031e9
 LVH_SHA256_aarch64=49b7cef6376c445c0ab23465ecc984a771e06b3b37c39b486a4fed7fb1ded476
 # Per-arch checksum of the published qemu-<arch>.tar.gz (binary + minimal
 # share/qemu blobs). CI records these; the matrix runner verifies the tarball.
-QEMU_SHA256_x86_64=0add524e0dd366ead34332aed0dafb4f11bc75f17884896aedb91faa28176dc2
-QEMU_SHA256_aarch64=be362492c2054c734bac78a776f17c0e0511f317d1dd8c924e82e00f8a7b2137
+QEMU_SHA256_x86_64=2e26722e965018c145bab180cee8feace50f91841bf51b350f14527c0d5da637
+QEMU_SHA256_aarch64=6fe353ef43918c14088c7a3741bfac54e6c17084ea462454a5b2a525ba0aa330
 
 # Alpine base used for the musl-static clang build.
 ALPINE_TAG=alpine:3.21
