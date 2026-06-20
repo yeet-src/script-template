@@ -80,6 +80,7 @@ fetch_bin bpftool
 fetch_bin veristat
 fetch_bin esbuild
 fetch_bin git
+fetch_bin gh
 
 # libbpf program headers: arch-independent, one copy per version, beside the
 # per-arch tool dirs ($key/include/bpf/*.h).
