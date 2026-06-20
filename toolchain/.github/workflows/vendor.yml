@@ -3,7 +3,7 @@ name: vendor-toolchain
 # Build and publish the static toolchain for x86_64 and aarch64: clang, make
 # and git are compiled from source on NATIVE runners per arch (no QEMU — the
 # multi-hour x86_64 LLVM build runs here in normal CI time), while bpftool,
-# esbuild and the libbpf headers are re-hosted from upstream. All are published
+# esbuild, gh and the libbpf headers are re-hosted from upstream. All are published
 # as version-addressed assets on the `toolchain` release, with checksums
 # recorded back into build/versions.env.
 #
@@ -84,7 +84,8 @@ jobs:
                         tagpat="^v${mm}(\.[0-9]+)?$" ;;
             *)          tagpat='^v[0-9]+\.[0-9]+(\.[0-9]+)?$' ;;
           esac
-          prev="$(git tag -l 'v[0-9]*' | grep -E "$tagpat" | sed 's/^v//' | sort -V | tail -1)"
+          # `|| true` so an empty tag set (no match) doesn't fail under pipefail.
+          prev="$(git tag -l 'v[0-9]*' | { grep -E "$tagpat" || true; } | sed 's/^v//' | sort -V | tail -1)"
           prevtag=""
           [ -n "$prev" ] && prevtag="v$prev"
           echo "prevtag=$prevtag" >> "$GITHUB_OUTPUT"
@@ -226,7 +227,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        tool: [bpftool, veristat, lvh, esbuild]
+        tool: [bpftool, veristat, lvh, esbuild, gh]
         arch:
           - { platform: amd64, name: x86_64 }
           - { platform: arm64, name: aarch64 }
@@ -268,7 +269,7 @@ jobs:
           # <tool>-<arch> holding one file, so install them all the same way.
           # qemu is the exception (a bin/+share tree), packed separately below.
           for a in x86_64 aarch64; do
-            for t in clang make git bpftool veristat lvh esbuild; do
+            for t in clang make git bpftool veristat lvh esbuild gh; do
               install -Dm755 "artifacts/${t}-${a}/${t}" "${a}/${t}"
             done
           done
@@ -327,7 +328,8 @@ jobs:
           esac
           # Clean tags on this line only; suffixed tags (vX.Y.Z-<flavor>) are
           # unordered variants and never advance the line.
-          latest="$(git tag -l 'v[0-9]*' | grep -E "$tagpat" | sed 's/^v//' | sort -V | tail -1)"
+          # `|| true` so an empty tag set (no match) doesn't fail under pipefail.
+          latest="$(git tag -l 'v[0-9]*' | { grep -E "$tagpat" || true; } | sed 's/^v//' | sort -V | tail -1)"
           flavor="${FLAVOR:-}"
           if [ -n "$flavor" ]; then
             # A flavor build is an unordered VARIANT of an existing release: it
@@ -380,7 +382,7 @@ jobs:
           # Record the checksum of every binary we publish, so a consumer
           # verifies the exact artifact it downloads from our release.
           for arch in x86_64 aarch64; do
-            for tool in clang make bpftool veristat lvh esbuild git; do
+            for tool in clang make bpftool veristat lvh esbuild git gh; do
               s="$(sha256sum "$arch/$tool" | awk '{print $1}')"
               key="$(echo "$tool" | tr a-z A-Z)_SHA256_${arch}"
               sed -i "s|^${key}=.*|${key}=${s}|" build/versions.env
@@ -429,17 +431,24 @@ jobs:
           # Consumers pin this one tag.
           mkdir -p dist
           for a in x86_64 aarch64; do
-            for t in clang make bpftool veristat lvh esbuild git; do cp "$a/$t" "dist/${t}-${a}"; done
+            for t in clang make bpftool veristat lvh esbuild git gh; do cp "$a/$t" "dist/${t}-${a}"; done
           done
           cp libbpf-headers.tar.gz dist/libbpf-headers.tar.gz
           # qemu for the optional kernel-matrix runner (fetched on demand, not by `make`).
           for a in x86_64 aarch64; do cp "qemu-$a.tar.gz" "dist/qemu-$a.tar.gz"; done
-          # Flavored tags (vX.Y.Z-<flavor>) are opt-in variants — mark them
-          # prerelease so GitHub never surfaces one as "Latest".
-          prerelease=""; case "$tag" in *-*) prerelease="--prerelease" ;; esac
+          # Pick the "Latest" flag explicitly (GitHub's default is recency-based,
+          # so a release/* back-port cut after a newer mainline release would
+          # otherwise steal the badge):
+          #   * flavor (vX.Y.Z-<flavor>) -> --prerelease (GitHub never marks it Latest)
+          #   * mainline (master)        -> --latest      (newest mainline IS Latest)
+          #   * release/* back-port      -> --latest=false (can't steal it)
+          case "$tag" in
+            *-*) flags="--prerelease --latest=false" ;;
+            *)   if [ "${GITHUB_REF_NAME}" = master ]; then flags="--latest"; else flags="--latest=false"; fi ;;
+          esac
           gh release view "$tag" >/dev/null 2>&1 \
-            || gh release create "$tag" --title "$tag" $prerelease \
-                 --notes "Static build toolchain $tag — clang/make/git built from source; bpftool/esbuild/libbpf headers re-hosted; qemu for the kernel-matrix runner."
+            || gh release create "$tag" --title "$tag" $flags \
+                 --notes "Static build toolchain $tag — clang/make/git built from source; bpftool/veristat/esbuild/gh/libbpf headers re-hosted; qemu for the kernel-matrix runner."
           # --clobber so a same-version re-run refreshes assets.
           gh release upload "$tag" dist/* --clobber
 

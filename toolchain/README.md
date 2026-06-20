@@ -40,6 +40,7 @@ before merge, so a typo can't silently mis-version a release.
 | `bpftool` | `vmlinux.h` (BTF dump) + link BPF objects          | official static release, re-hosted |
 | `veristat`| check `*.bpf.o` load + BPF verifier statistics     | official static release, re-hosted |
 | `esbuild` | bundle the JS entry                                | official static (Go) binary, re-hosted |
+| `gh`      | release/PR automation (CI + consumer tooling)      | official static (Go) binary, re-hosted |
 | `bpf/*.h` | libbpf program headers (`<bpf/bpf_helpers.h>`, …)  | libbpf bundled with bpftool |
 
 The table above is the **build** toolchain — what `make` resolves. The same
@@ -81,7 +82,7 @@ from this repo's release, checksum-verified. Pull updates with
 Change a tool pin in [`build/versions.env`](build/versions.env) and push — the
 [`vendor-toolchain`](.github/workflows/vendor.yml) workflow rebuilds clang/make/
 git (and the test-runner qemu) on native x86_64 and arm64 runners, re-hosts
-bpftool/veristat/lvh/esbuild/headers,
+bpftool/veristat/lvh/esbuild/gh/headers,
 **computes the next semver tag** (highest existing, bumped by the level the
 commit messages ask for — minor by default), publishes all assets to
 that immutable release, and records the version + checksums into `versions.env`.
@@ -134,5 +135,5 @@ Build a single tool locally:
 
 ```sh
 build/build-clang.sh arm64        # or amd64; also build-make.sh / build-git.sh / build-qemu.sh
-build/fetch-bpftool.sh            # prebuilt; also fetch-veristat.sh / fetch-lvh.sh / fetch-esbuild.sh / fetch-libbpf-headers.sh
+build/fetch-bpftool.sh            # prebuilt; also fetch-veristat.sh / fetch-lvh.sh / fetch-esbuild.sh / fetch-gh.sh / fetch-libbpf-headers.sh
 ```

@@ -1,4 +1,4 @@
-# Resolve the static build toolchain (clang, bpftool, veristat, esbuild, git) — included
+# Resolve the static build toolchain (clang, bpftool, veristat, esbuild, git, gh) — included
 # by the project Makefile before build/bpf.mk, so the tools are set before any
 # rule uses them. A `make CLANG=…` CLI override beats this.
 #
@@ -11,7 +11,7 @@
 # Falls back to host tools on PATH when no lock is present.
 #
 # The vendored binaries are Linux musl-static, so the cache is only used on
-# Linux. On any other host (macOS, BSD) we leave CLANG/BPFTOOL/ESBUILD/GIT
+# Linux. On any other host (macOS, BSD) we leave CLANG/BPFTOOL/ESBUILD/GIT/GH
 # unset, falling through to host tools on PATH — macOS is an edit-here,
 # build-on-Linux host for BPF work.
 
@@ -36,6 +36,7 @@ ifneq ($(TOOLCHAIN_LOCK),)
   VERISTAT ?= $(TOOLCHAIN_DIR)/veristat
   ESBUILD  ?= $(TOOLCHAIN_DIR)/esbuild
   GIT      ?= $(TOOLCHAIN_DIR)/git
+  GH       ?= $(TOOLCHAIN_DIR)/gh
   # libbpf program headers are arch-independent: one copy per version key,
   # beside the per-arch tool dirs.
   BPF_SYSINCLUDE ?= $(YEET_CACHE_DIR)/toolchain/$(TOOLCHAIN_KEY)/include
@@ -45,6 +46,7 @@ endif
 VERISTAT ?= veristat
 ESBUILD  ?= esbuild
 GIT      ?= git
+GH       ?= gh
 
 # Fill the cache for this arch, downloading any missing tool once. A no-op
 # when no lock is present (PATH case).
