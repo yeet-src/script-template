@@ -10,11 +10,12 @@ const BARW = 16;
 
 export default ({ latency, maxRows }) => (
   <Box>
-    <Text height="1">{fg(idx(244))(" runqueue latency  (wakeup → on-cpu)")}</Text>
+    <Text height="1">{fg(idx(244))(" runqueue latency")}</Text>
+    <Text height="1">{fg(idx(244))(" (wakeup → on-cpu)")}</Text>
     <Box>
       {() => {
         const slots = latency.get();
-        const fit = Math.max(1, (maxRows ?? HI - LO + 2) - 1); // rows for bars
+        const fit = Math.max(1, (maxRows ?? HI - LO + 3) - 2); // rows for bars (2 header lines)
 
         // Window the buckets to what fits, biased to the populated range, so a
         // short panel shows the live distribution instead of clipping it away.
