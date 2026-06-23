@@ -39,7 +39,7 @@ shares its `control`; each probe module attaches its own maps.
 Makefile              build frontend — orchestrates the two compilers
 build/bpf.mk          clang + bpftool rules: src/bpf/*.bpf.c -> bin/probe.bpf.o
 build/gen-vmlinux.sh  generates src/bpf/include/vmlinux.h from kernel BTF
-package.json          esbuild bundle script + npm deps
+package.json          project manifest + optional npm/jsr deps
 tsconfig.json         `#/` -> project root, `@/` -> ./src path aliases
 src/main.jsx          entry — composition root: input + mount
 src/probes/probe.js   loads the shared BPF object (binds maps, start())
@@ -68,8 +68,10 @@ yeet run .     # runs the bundled src/index.jsx (needs root for BPF)
 
 `make` runs two independent compilers: **clang + bpftool** compile
 `src/bpf/*.bpf.c` and link them into one loadable object `bin/probe.bpf.o`;
-**esbuild** bundles `src/main.jsx` into `src/index.jsx`, inlining npm deps and
-the `@/` alias and leaving `yeet:*` builtins external.
+**esbuild** bundles `src/main.jsx` into `src/index.jsx`, resolving the `@/`
+alias (and inlining any npm/jsr deps you add) and leaving `yeet:*` builtins
+external. esbuild is vendored by the toolchain, so the build needs no
+node/npm.
 
 The data layer loads the object at runtime:
 
@@ -122,9 +124,14 @@ which is why the BPF object is located with `import.meta.dirname`.
 
 ## npm / jsr packages
 
-Add dependencies to `package.json` and import them normally; esbuild inlines
-them at bundle time. Only packages that run in bare V8 work — no Node builtins
-(`fs`, `net`, …), and no `Intl` / `TextEncoder` / `TextDecoder`.
+The starter needs no third-party packages — it imports only `yeet:*` builtins
+and local `@/` modules, so `make` builds with no npm/node and no `node_modules`.
+
+To pull in a dependency, add it to `package.json` and install it into
+`node_modules` with whatever package manager you like (`npm`, `pnpm`, `bun`, …)
+— esbuild inlines whatever it finds there at bundle time. Only packages that
+run in bare V8 work: no Node builtins (`fs`, `net`, …), and no `Intl` /
+`TextEncoder` / `TextDecoder`.
 
 ## Pure-JS scripts
 
@@ -135,5 +142,7 @@ feed the components from any source that exposes the same signals.
 
 - `clang` and `bpftool` (for the BPF leg; `bpftool` generates
   `src/bpf/include/vmlinux.h` from the host kernel, which needs `CONFIG_DEBUG_INFO_BTF`)
-- `node` + `npm` at build time for esbuild (authoring only — not needed on
-  hosts that merely *run* the built project)
+
+No node/npm is required: esbuild is vendored by the toolchain, and the starter
+has no third-party deps. (You only need a package manager if you add npm/jsr
+dependencies of your own — see *npm / jsr packages* above.)
