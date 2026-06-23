@@ -7,12 +7,20 @@ name: kernel-matrix
 # QEMU/KVM on the runner. Each job writes a detail table to its step summary and
 # uploads its result; the final `matrix` job pivots them into one ✅/❌ grid.
 #
-# Tune `matrix.kernel` to the kernels your script must support. Available tags
-# live at https://quay.io/repository/lvh-images/kind?tab=tags — the `<ver>-main`
-# entries track the latest build of each line. The example probes are CO-RE
-# tracepoint programs, so they need a BTF-capable kernel (~5.4+); a program that
-# uses newer features (ringbuf, sched_ext, …) will legitimately fail to load on
-# kernels that predate them — which is exactly what this matrix surfaces.
+# Tune `matrix.kernel` to the kernel lines your script must support (`6.6`,
+# `bpf-next`, …); available lines live at
+# https://quay.io/repository/lvh-images/kind?tab=tags. Each line is resolved to
+# a concrete image at run time rather than using the floating `<ver>-main` tag,
+# which the action can't consume: little-vm-helper@v0.0.30 derives the VM image
+# filename by stripping a trailing *numeric* build stamp, so a `-main` tag
+# yields a name that doesn't match the file `lvh` actually unpacks and the run
+# dies with "invalid reference format". So each job looks up the newest
+# date-stamped tag (`<ver>-YYYYMMDD.HHMMSS`, which the action handles) — always
+# tracking the latest build, with no tag to bump and immune to quay's pruning of
+# old stamps. The example probes are CO-RE tracepoint programs, so they need a
+# BTF-capable kernel (~5.4+); a program that uses newer features (ringbuf,
+# sched_ext, …) will legitimately fail to load on kernels that predate them —
+# which is exactly what this matrix surfaces.
 
 on:
   workflow_dispatch:
@@ -29,16 +37,31 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
+        # Kernel lines to verify. Each is resolved to its newest date-stamped
+        # lvh image at run time (see the header).
         kernel:
-          - '5.10-main'
-          - '5.15-main'
-          - '6.1-main'
-          - '6.6-main'
-          - '6.12-main'
-          - 'bpf-next-main'
+          - '6.1'
+          - '6.6'
+          - '6.12'
+          - 'bpf-next'
     name: kernel ${{ matrix.kernel }}
     steps:
       - uses: actions/checkout@v4
+
+      - name: Resolve newest lvh image tag
+        id: img
+        env:
+          KERNEL: ${{ matrix.kernel }}
+        run: |
+          set -euo pipefail
+          # Newest <line>-YYYYMMDD.HHMMSS tag (date-stamps sort
+          # lexicographically, so tail -1 is the most recent build).
+          newest="$(curl -sf "https://quay.io/api/v1/repository/lvh-images/kind/tag/?onlyActiveTags=true&limit=100&filter_tag_name=like:${KERNEL}-" \
+            | jq -r '.tags[].name' \
+            | grep -E "^${KERNEL}-[0-9]{8}\.[0-9]+$" | sort | tail -1)"
+          [ -n "$newest" ] || { echo "::error::no date-stamped tag found for kernel line '${KERNEL}'"; exit 1; }
+          echo "resolved ${KERNEL} -> ${newest}"
+          echo "tag=${newest}" >> "$GITHUB_OUTPUT"
 
       - name: Build BPF object + stage veristat
         run: |
@@ -65,7 +88,7 @@ jobs:
         with:
           test-name: veristat-${{ matrix.kernel }}
           image: kind
-          image-version: ${{ matrix.kernel }}
+          image-version: ${{ steps.img.outputs.tag }}
           host-mount: ${{ github.workspace }}
           install-dependencies: 'true'
           cmd: |
@@ -140,7 +163,7 @@ jobs:
               m = re.match(r"(\d+)\.(\d+)", k)
               return (1, 0, 0) if not m else (0, int(m.group(1)), int(m.group(2)))
           kernels.sort(key=keyf)
-          short = lambda k: k.replace("-main", "")
+          short = lambda k: re.sub(r"-(main|\d{8}\.\d+)$", "", k)
 
           print("## 🐧 Kernel verification matrix\n")
           if not progs:
