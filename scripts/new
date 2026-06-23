@@ -48,7 +48,7 @@ cp -R "$SRC/." "$DEST/"
 
 # Substitute __NAME__ in the files that carry it. Portable in-place edit
 # (BSD and GNU sed disagree on -i), so go through a temp file.
-for f in package.json package-lock.json README.md; do
+for f in package.json README.md; do
 	[ -f "$DEST/$f" ] || continue
 	tmp="$DEST/$f.tmp.$$"
 	sed "s/__NAME__/$NAME/g" "$DEST/$f" >"$tmp"
