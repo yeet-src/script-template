@@ -3,8 +3,7 @@
 # @esbuild/<platform> npm package into v/<arch>/esbuild so CI can re-host it on
 # our toolchain release. The consumer-facing integrity check is the published
 # binary's checksum (versions.env, verified by build/fetch-toolchain.sh), so
-# this upstream fetch — run in CI over TLS — isn't pinned. Keep ESBUILD_VERSION
-# in sync with template/package.json.
+# this upstream fetch — run in CI over TLS — isn't pinned.
 #
 #   build/fetch-esbuild.sh [amd64|arm64]   (default: both)
 

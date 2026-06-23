@@ -39,7 +39,6 @@ shares its `control`; each probe module attaches its own maps.
 Makefile              build frontend — orchestrates the two compilers
 build/bpf.mk          clang + bpftool rules: src/bpf/*.bpf.c -> bin/probe.bpf.o
 build/gen-vmlinux.sh  generates src/bpf/include/vmlinux.h from kernel BTF
-package.json          esbuild bundle script + npm deps
 tsconfig.json         `#/` -> project root, `@/` -> ./src path aliases
 src/main.jsx          entry — composition root: input + mount
 src/probes/probe.js   loads the shared BPF object (binds maps, start())
@@ -68,8 +67,9 @@ yeet run .     # runs the bundled src/index.jsx (needs root for BPF)
 
 `make` runs two independent compilers: **clang + bpftool** compile
 `src/bpf/*.bpf.c` and link them into one loadable object `bin/probe.bpf.o`;
-**esbuild** bundles `src/main.jsx` into `src/index.jsx`, inlining npm deps and
-the `@/` alias and leaving `yeet:*` builtins external.
+**esbuild** bundles `src/main.jsx` into `src/index.jsx`, resolving the `@/`
+alias and leaving `yeet:*` builtins external. Both come from the vendored
+toolchain — the build needs no system toolchain and no Node/npm.
 
 The data layer loads the object at runtime:
 
@@ -122,9 +122,12 @@ which is why the BPF object is located with `import.meta.dirname`.
 
 ## npm / jsr packages
 
-Add dependencies to `package.json` and import them normally; esbuild inlines
-them at bundle time. Only packages that run in bare V8 work — no Node builtins
-(`fs`, `net`, …), and no `Intl` / `TextEncoder` / `TextDecoder`.
+The starter pulls in none, so there's no `package.json` and the build never
+touches npm. To add one: create a `package.json`, `npm install` your dep, and
+import it normally — esbuild inlines it from `node_modules` at bundle time
+(this is the only step that needs Node/npm, and only when you opt in). Only
+packages that run in bare V8 work — no Node builtins (`fs`, `net`, …), and no
+`Intl` / `TextEncoder` / `TextDecoder`.
 
 ## Pure-JS scripts
 
@@ -135,5 +138,7 @@ feed the components from any source that exposes the same signals.
 
 - `clang` and `bpftool` (for the BPF leg; `bpftool` generates
   `src/bpf/include/vmlinux.h` from the host kernel, which needs `CONFIG_DEBUG_INFO_BTF`)
-- `node` + `npm` at build time for esbuild (authoring only — not needed on
-  hosts that merely *run* the built project)
+
+All of these come from the vendored toolchain, so a stock build needs no
+system toolchain and no Node/npm. (Node/npm are only needed if you add an npm
+package — see above.)
