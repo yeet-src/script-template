@@ -27,7 +27,13 @@ RUN curl -fSL -o git.tar.xz \
  && rm git.tar.xz
 
 WORKDIR /src/git-${GIT_VERSION}
+# git's Makefile defaults `prefix` to $HOME, which is /root in this build, so
+# without these the system config path bakes in as /root/etc/gitconfig — a
+# path that doesn't exist (and isn't readable) wherever the binary actually
+# runs, so every invocation aborts reading it. Pin the conventional
+# /etc/gitconfig instead, which is absent-or-readable on a normal host.
 RUN make -j"$(nproc)" \
+        prefix=/usr sysconfdir=/etc \
         NO_CURL=1 NO_OPENSSL=1 NO_TCLTK=1 NO_GETTEXT=1 NO_PYTHON=1 \
         NO_INSTALL_HARDLINKS=1 NO_PERL=1 \
         NO_REGEX=1 \
@@ -39,7 +45,13 @@ RUN make -j"$(nproc)" \
  && cp git /git \
  # Prove it can initialize a repo with no external helpers on PATH.
  && /git init -q /tmp/t && /git -C /tmp/t rev-parse --is-inside-work-tree >/dev/null \
- && echo "confirmed: git init works standalone"
+ && echo "confirmed: git init works standalone" \
+ # Re-run as a non-root user: this is the case that caught the baked /root
+ # config path. If the system config still resolved under /root, a normal
+ # user couldn't read it and git would abort here.
+ && adduser -D tester \
+ && su tester -c '/git init -q /tmp/t2 && /git -C /tmp/t2 rev-parse --is-inside-work-tree >/dev/null' \
+ && echo "confirmed: git init works as non-root"
 
 FROM scratch AS export
 COPY --from=build /git /git
