@@ -1,7 +1,7 @@
 // Run-queue latency as a log2 histogram. Reads the polled `latency` signal
 // (cumulative counts per bucket) and draws a bar per bucket, the label
 // being the bucket's lower bound.
-import { Box, Text, fg, idx } from "yeet:tui";
+import { Box, Text, idx } from "yeet:tui";
 import { fmtDuration, lpad } from "@/lib/format.js";
 
 const LO = 8; // 2^8 ns = 256ns
@@ -10,8 +10,8 @@ const BARW = 16;
 
 export default ({ latency, maxRows }) => (
   <Box>
-    <Text height="1">{fg(idx(244))(" runqueue latency")}</Text>
-    <Text height="1">{fg(idx(244))(" (wakeup → on-cpu)")}</Text>
+    <Text height="1" fg={idx(244)}>{" runqueue latency"}</Text>
+    <Text height="1" fg={idx(244)}>{" (wakeup → on-cpu)"}</Text>
     <Box>
       {() => {
         const slots = latency.get();
@@ -36,11 +36,9 @@ export default ({ latency, maxRows }) => (
           const w = Math.round((n / peak) * BARW);
           rows.push(
             <Text height="1" break="none">
-              {[
-                fg(idx(244))(`${lpad(fmtDuration(2 ** i), 7)} `),
-                fg(idx(75))("█".repeat(w)),
-                fg(idx(240))(n ? ` ${n}` : ""),
-              ]}
+              <Text fg={idx(244)}>{`${lpad(fmtDuration(2 ** i), 7)} `}</Text>
+              <Text fg={idx(75)}>{"█".repeat(w)}</Text>
+              <Text fg={idx(240)}>{n ? ` ${n}` : ""}</Text>
             </Text>,
           );
         }
