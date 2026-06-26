@@ -16,7 +16,7 @@
  *
  * To ship a pure-JS script, delete src/bpf/, bin/, and probes/cpusched.js.
  */
-import { Box, Text, fg, idx, mount, signal } from "yeet:tui";
+import { Box, Text, idx, mount, signal } from "yeet:tui";
 import { numCpus } from "@/probes/probe.js";
 import { cpus, minSlice, procs, setMinSlice } from "@/probes/cpusched.js";
 import { latency } from "@/probes/runqlat.js";
@@ -52,7 +52,7 @@ tty.on?.("mousedown", (e) => {
   if (i >= 0 && i < numCpus) selected.set(i);
 });
 
-const Rule = () => <Text height="1">{fg(idx(238))("─".repeat(400))}</Text>;
+const Rule = () => <Text height="1" fg={idx(238)}>{"─".repeat(400)}</Text>;
 
 // One layout cell → its component, filled with the extents the layout chose.
 const cell = (c) => {
