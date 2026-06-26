@@ -199,17 +199,42 @@ a subscription callback, or `Promise.resolve().then(() => sig.set(…))`.
 `"fit"`, `"50vw"`, `Size.min/max/clamp/add/sub(...)`. **Frame the root with
 `1fr` or a fixed size or the tree collapses to 0.**
 
-**Color & faces** — combinators wrap a string (innermost wins):
-`fg(color)`, `bg(color)`, `bold`, `dim`, `italic`, `underline`, `reverse`,
-`strike`. Colors: `idx(0..255)`, `rgb(0xRRGGBB)` / `rgb(r,g,b)`,
-`rgba(...,a)`, `color("#ff0080")`, `DEFAULT`.
+**Color & faces** — a `<Text>`'s bare attributes *are* its face: `fg`, `bg`,
+and the boolean SGR flags `bold`/`dim`/`italic`/`underline`/`reverse`/`strike`.
+Colors: a hex string anywhere (`"#ff0080"`, `"#f08"`, `"#ff0080cc"`), or
+`idx(0..255)`, `rgb(0xRRGGBB)` / `rgb(r,g,b)`, `rgba(...,a)`, `DEFAULT`.
 
 ```jsx
-<Text>{() => bold(fg(idx(2))(`${pct(frac.get())}`))}</Text>
+<Text bold fg={idx(2)}>{() => pct(frac.get())}</Text>
+```
+
+**Uniform style → bare attrs. Per-span → nest. Runtime-computed → `face()`.**
+Bare attrs face the *whole* Text, so a line with per-span colors nests `<Text>`
+runs as children — the inner face merges over the outer, so it wins:
+
+```jsx
+<Text>
+  <Text fg={out}>↑</Text>
+  <Text fg={idx(8)}>{n}</Text>
+  <Text fg={role}>{name}</Text>
+</Text>
+```
+
+When the face itself is computed at runtime, `face(patch)` applies a patch
+object to content — the programmatic form behind `<Text>`, and the escape hatch
+when bare attrs can't carry a dynamic value:
+
+```jsx
+import { face } from "yeet:tui";
+<Text>{() => face({ fg: heat(frac.get()), bold: frac.get() > 0.9 })(label)}</Text>
 ```
 
 (There's also a separate `style.red(s)` / `style.bold(s)` global — that's for
-raw `tty.write` line-mode tools, *not* the JSX tree. Use face combinators here.)
+raw `tty.write` line-mode tools, *not* the JSX tree.)
+
+> The named combinators `fg(c)(s)` / `bold(s)` / `dim(s)` … are **deprecated**,
+> kept only for back-compat. Reach for bare attrs, nested `<Text>`, or
+> `face(patch)` instead.
 
 ## Data sources
 
@@ -296,7 +321,9 @@ writes atomically. `yeet.exit()` tears the script down.
 3. **Set-during-render throws** — defer signal writes out of the render path.
 4. **`column` is the default Box direction** (Yoga, not CSS) — set
    `direction="row"` explicitly for horizontal.
-5. **Use `fg`/`bg`/`bold`** in the tree — never `color`/`style`/`backgroundColor`.
+5. **Style with bare `<Text>` attrs** (`fg`/`bg`/`bold`/…) — never
+   `color`/`style`/`backgroundColor`, and not the deprecated `fg(c)(s)`/`bold(s)`
+   combinators (use `face(patch)` when the style is computed at runtime).
 6. **Ring-buffer events are wrapped** under the `btf_struct` name — unwrap with
    `w?.<struct> ?? w`.
 7. **`@/` and `#/` are bundle-time only** — the runtime resolver doesn't know
@@ -333,7 +360,7 @@ widths read `frac`, so each fill is a thunk child that re-mints its Box when
 
 ```jsx
 // components/gauge.jsx
-import { Box, Text, bold, fg, idx } from "yeet:tui";
+import { Box, Text, idx } from "yeet:tui";
 
 const RAIL = idx(238);
 const heat = (f) => (f < 0.6 ? idx(2) : f < 0.85 ? idx(3) : idx(1));
@@ -343,10 +370,10 @@ const lpad = (s, n) => `${s}`.padStart(n);
 export default function Gauge({ frac, label }) {
   return (
     <Box height="1" direction="row">
-      <Text width="8">{fg(idx(244))(label)}</Text>
+      <Text width="8" fg={idx(244)}>{label}</Text>
       {() => <Box width={`${1 + Math.round(frac.get() * 998)}fr`} bg={heat(frac.get())} />}
       {() => <Box width={`${1 + Math.round((1 - frac.get()) * 998)}fr`} bg={RAIL} />}
-      <Text width="5">{() => bold(lpad(pct(frac.get()), 5))}</Text>
+      <Text width="5" bold>{() => lpad(pct(frac.get()), 5)}</Text>
     </Box>
   );
 }
@@ -390,7 +417,7 @@ export const cpuPct = computed(() => Math.round(cpu.get() * 100));
 
 ```jsx
 // main.jsx
-import { Box, Text, bold, mount } from "yeet:tui";
+import { Box, Text, mount } from "yeet:tui";
 import { cpu } from "@/probes/sysload.js";
 import Gauge from "@/components/gauge.jsx";
 
@@ -400,7 +427,7 @@ tty.on("keydown", (e) => {
 
 const Root = () => (
   <Box>
-    <Text height="1">{bold(" sysload  —  q to quit")}</Text>
+    <Text height="1" bold>{" sysload  —  q to quit"}</Text>
     <Box height="1fr" overflow="hidden">
       <Gauge frac={cpu} label="cpu" />
     </Box>
@@ -557,7 +584,7 @@ The other egress: the kernel aggregates into an array map, JS just reads slots.
 
 ```jsx
 // components/histogram.jsx — `latency` is a signal of per-bucket counts
-import { Box, Text, fg, idx } from "yeet:tui";
+import { Box, Text, idx } from "yeet:tui";
 
 const BARS = "▁▂▃▄▅▆▇█";
 const lo = (i) => (i === 0 ? 0 : 1 << (i - 1));     // log2 bucket lower bound (ns)
@@ -571,7 +598,7 @@ export default function Histogram({ latency }) {
         return slots.map((n, i) => (
           <Text height="1">
             {`${String(lo(i)).padStart(12)}ns `}
-            {fg(idx(4))(BARS[Math.min(7, Math.floor((n / peak) * 7.99))].repeat(Math.ceil((n / peak) * 40)))}
+            <Text fg={idx(4)}>{BARS[Math.min(7, Math.floor((n / peak) * 7.99))].repeat(Math.ceil((n / peak) * 40))}</Text>
             {`  ${n}`}
           </Text>
         ));
@@ -637,7 +664,7 @@ The crash screen itself is just a `bg`-filled box — no special API:
 
 ```jsx
 // components/bsod.jsx
-import { Box, Text, bold, fg, idx } from "yeet:tui";
+import { Box, Text, idx } from "yeet:tui";
 
 const BLUE = idx(20);
 const WHITE = idx(15);
@@ -646,11 +673,11 @@ export default function Bsod({ error }) {
   const lines = String(error?.stack ?? error?.message ?? error).split("\n");
   return (
     <Box bg={BLUE} width="1fr" height="1fr" padding={2}>
-      <Text height="1">{bold(fg(WHITE)(":(  your dashboard hit an error"))}</Text>
+      <Text height="1" bold fg={WHITE}>{":(  your dashboard hit an error"}</Text>
       <Text height="1">{" "}</Text>
-      {lines.map((l) => <Text height="1">{fg(WHITE)(l)}</Text>)}
+      {lines.map((l) => <Text height="1" fg={WHITE}>{l}</Text>)}
       <Text height="1">{" "}</Text>
-      <Text height="1">{fg(idx(250))("press q to quit")}</Text>
+      <Text height="1" fg={idx(250)}>{"press q to quit"}</Text>
     </Box>
   );
 }

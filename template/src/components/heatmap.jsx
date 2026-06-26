@@ -4,18 +4,18 @@
 // brighter than quiet ones. `gridCols`/`maxRows` come from the responsive
 // layout: it renders the most recent `gridCols` of history and, when there
 // are more cores than rows, windows the list to keep the selection in view.
-import { Box, Text, bold, fg, idx } from "yeet:tui";
+import { Box, Text, idx } from "yeet:tui";
 import { heat } from "@/lib/format.js";
 
 const HEADER = "  cores × time   (newest → right)   brightness = switch rate";
 
 export default ({ cpus, selected, gridCols, maxRows }) => (
   <Box>
-    <Text height="1">
+    <Text height="1" fg={idx(244)}>
       {() => {
         const total = cpus.get().length;
         const shown = Math.min(maxRows, total);
-        return fg(idx(244))(total > shown ? `${HEADER}   · ${total} cores` : HEADER);
+        return total > shown ? `${HEADER}   · ${total} cores` : HEADER;
       }}
     </Text>
     <Box>
@@ -39,10 +39,13 @@ export default ({ cpus, selected, gridCols, maxRows }) => (
           const label = `${on ? "▸" : " "} cpu ${String(i).padStart(2)} `;
           const cells = c.hist
             .slice(-gridCols)
-            .map((v) => fg(heat(v <= 0 ? 0 : Math.sqrt(v / peak)))("█"));
+            .map((v) => <Text fg={heat(v <= 0 ? 0 : Math.sqrt(v / peak))}>{"█"}</Text>);
+          const head = on
+            ? <Text bold fg={idx(231)}>{label}</Text>
+            : <Text fg={idx(245)}>{label}</Text>;
           return (
             <Text height="1" break="none">
-              {[on ? bold(fg(idx(231))(label)) : fg(idx(245))(label), ...cells]}
+              {[head, ...cells]}
             </Text>
           );
         });
