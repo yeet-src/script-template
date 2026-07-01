@@ -58,8 +58,16 @@ banner:
 # `--log-level=warning` drops esbuild's own success summary (the outfile/size
 # line and "Done in Nms") so the build shows just our one `bundle` step — real
 # warnings and errors still print.
+#
+# `--define:import.meta.main=false` compiles out the `import.meta.main`
+# self-test guards (see AGENTS.md). Bundling collapses every module into one
+# file that shares the entry's `import.meta`, so without this each guarded
+# block would see `main === true` and all fire at once in the built app;
+# defined to false they become `if (false)` and drop. A standalone
+# `yeet run src/probes/foo.js` isn't bundled, so its guard still runs.
 ESBUILD_FLAGS := --bundle --format=esm --platform=neutral \
 	--main-fields=module,main --conditions=import,module --log-level=warning \
+	--define:import.meta.main=false \
 	--outfile=dist/index.jsx --jsx=automatic --jsx-import-source=yeet:tui
 
 bundle: | toolchain

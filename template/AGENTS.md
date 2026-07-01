@@ -40,7 +40,11 @@ blank panel could mean anything.
 Before any JSX, confirm the kernel actually gives you the fields and types you
 think it does. Guard a self-test with `import.meta.main` — it's `true` **only**
 when this module is the run entry, so the block runs when you point `yeet run`
-at the module and stays dormant once `main.jsx` imports it.
+at the module. The build bundles with `import.meta.main` defined to `false`, so
+these guards compile out of `dist/index.jsx` entirely — they never fire in the
+built app, only when you invoke the module directly. (Don't rely on plain
+`main.jsx` imports to keep them dormant: bundling collapses every module into
+one, so without that define they'd all see the entry's `main === true`.)
 
 Verify the **raw source**, not a `from()` signal (a `from()` producer doesn't
 run until something watches it — there's no UI here):
