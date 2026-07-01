@@ -66,7 +66,8 @@ bin:
 	mkdir -p bin
 
 clean-bpf:
-	rm -rf $(BPF_OUT) .build/bpf $(VMLINUX)
+	@$(SAY) step bpf "$(BPF_OUT) · .build/bpf"
+	$(Q)rm -rf $(BPF_OUT) .build/bpf $(VMLINUX)
 
 # Load the linked object with veristat to confirm THIS kernel's verifier
 # accepts every program, and to see per-program complexity (insns/states) — a

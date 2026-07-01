@@ -89,7 +89,16 @@ postgen: | vendored-git
 		echo "warning: no git available (vendored or host); skipping 'git init'" >&2; \
 	fi
 
-clean: clean-bpf
-	rm -rf node_modules dist
+# Mirrors the build's titled progress list: a head banner, one step per
+# artifact group removed (BPF objects via clean-bpf, then the JS build
+# outputs), and a done summary. clean-banner is the leftmost prerequisite so
+# it prints before clean-bpf's own step, exactly as `banner` fronts `all`.
+clean: clean-banner clean-bpf
+	@$(SAY) step js "dist/ · node_modules/"
+	$(Q)rm -rf dist node_modules
+	@$(SAY) done "cleaned $(notdir $(CURDIR))"
 
-.PHONY: all banner bundle clean postgen
+clean-banner:
+	@$(SAY) head "cleaning $(notdir $(CURDIR))"
+
+.PHONY: all banner bundle clean clean-banner postgen
