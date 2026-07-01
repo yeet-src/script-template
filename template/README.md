@@ -1,7 +1,7 @@
 # __NAME__
 
 A yeet script: a reactive JSX TUI bundled with esbuild, an `@/` source
-alias, and a BPF program — all driven by one `make`.
+alias, and a BPF program — all driven by `yeet build`.
 
 The starter is **cpusched**: a live scheduler dashboard. The top is a
 cores × time heatmap of context-switch rate (one row per CPU, newest column
@@ -36,9 +36,11 @@ shares its `control`; each probe module attaches its own maps.
 ## Layout
 
 ```
-Makefile              build frontend — orchestrates the two compilers
-build/bpf.mk          clang + bpftool rules: src/bpf/*.bpf.c -> bin/probe.bpf.o
-build/gen-vmlinux.sh  generates src/bpf/include/vmlinux.h from kernel BTF
+Makefile              thin shim → .build/Makefile (keeps `make`/`yeet run` working)
+.build/               build back end — gitignored, materialized by `yeet build`:
+.build/Makefile         orchestrates the two compilers
+.build/bpf.mk           clang + bpftool rules: src/bpf/*.bpf.c -> bin/probe.bpf.o
+.build/gen-vmlinux.sh   generates src/bpf/include/vmlinux.h from kernel BTF
 package.json          project manifest + optional npm/jsr deps
 tsconfig.json         `#/` -> project root, `@/` -> ./src path aliases
 src/main.jsx          entry — composition root: input + mount
@@ -51,7 +53,7 @@ src/bpf/cpusched.bpf.c  sched_switch program + the runtime knob
 src/bpf/runqlat.bpf.c   wakeup→on-CPU latency histogram
 bin/                  the linked BPF object lands here
 .github/workflows/kernel-matrix.yml  CI: verify the object across kernels
-build/verify-kernel.sh  the in-VM gate that workflow runs
+.build/verify-kernel.sh  the in-VM gate that workflow runs
 ```
 
 The JS is layered: `probes/` is the only BPF-aware code (it owns the object
@@ -62,16 +64,23 @@ the `@/` alias; `main.jsx` wires them together and owns input.
 ## Build & run
 
 ```sh
-make           # compile BPF (clang + bpftool) + bundle JS (esbuild)
-yeet run .     # runs the bundled src/index.jsx (needs root for BPF)
+yeet build     # compile BPF (clang + bpftool) + bundle JS (esbuild)
+yeet run .     # runs the bundled dist/index.jsx (needs root for BPF)
 ```
 
-`make` runs two independent compilers: **clang + bpftool** compile
+`yeet build` is the frontend; the low-level orchestration lives under `.build/`
+(gitignored and materialized on demand). Bare `make` still works — the root
+`Makefile` is a thin shim that forwards to `.build/Makefile` — which is also how
+`yeet run` auto-builds before running. The build prints a styled step list;
+pass `V=1` (`yeet build V=1` / `make V=1`) to see the raw compiler commands.
+
+It drives two independent compilers: **clang + bpftool** compile
 `src/bpf/*.bpf.c` and link them into one loadable object `bin/probe.bpf.o`;
-**esbuild** bundles `src/main.jsx` into `src/index.jsx`, resolving the `@/`
+**esbuild** bundles `src/main.jsx` into `dist/index.jsx`, resolving the `@/`
 alias (and inlining any npm/jsr deps you add) and leaving `yeet:*` builtins
 external. esbuild is vendored by the toolchain, so the build needs no
-node/npm.
+node/npm. `yeet run .` prefers that built `dist/index.jsx` over the raw
+`src/main.jsx`, so once built the bundle is what runs.
 
 The data layer loads the object at runtime:
 
@@ -99,7 +108,7 @@ kernel in its matrix it builds `bin/probe.bpf.o`, boots that kernel in a VM
 ([cilium's little-vm-helper](https://github.com/cilium/little-vm-helper), images
 from `quay.io/lvh-images`), and runs the vendored static **veristat** against the
 object — failing the job if the verifier rejects any program. The check is
-`build/verify-kernel.sh`.
+`.build/verify-kernel.sh`.
 
 Edit `matrix.kernel` to the kernels you care about (tags at
 [quay.io/lvh-images/kind](https://quay.io/repository/lvh-images/kind?tab=tags);
@@ -113,9 +122,9 @@ boots those kernel images with [`lvh`](https://github.com/cilium/little-vm-helpe
 `make veristat-matrix KERNELS="6.6-main bpf-next-main"`. Both `lvh` and a static
 `qemu` are fetched on demand (VM infra, not part of the build toolchain) — the
 vendored static qemu comes from the toolchain release, checksum-pinned in
-`build/toolchain.lock`, falling back to a system `qemu-system` if absent.
+`.build/toolchain.lock`, falling back to a system `qemu-system` if absent.
 
-> Requires a toolchain pin (`build/toolchain.lock`) that ships `veristat`; the
+> Requires a toolchain pin (`.build/toolchain.lock`) that ships `veristat`; the
 > workflow says so explicitly if the pinned version predates it.
 
 `#/` (project root) and `@/` (source root) are **bundle-time aliases** that

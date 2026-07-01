@@ -5,7 +5,7 @@
 # The static build toolchain (clang, bpftool, esbuild, make, git) lives in its
 # own repo, yeet-src/toolchain, vendored here under toolchain/ and pinned to a
 # release tag. The template payload doesn't read toolchain/ directly — it
-# carries its own copies under template/build/ (the embed glue + a
+# carries its own copies under template/.build/ (the embed glue + a
 # toolchain.lock) so a generated project stays self-contained. `sync-toolchain`
 # refreshes both from a tag.
 TOOLCHAIN_REPO ?= git@github.com:yeet-src/toolchain.git
@@ -37,10 +37,18 @@ sync-toolchain:
 	@split=$$(git rev-parse FETCH_HEAD); \
 	echo ">> replacing toolchain/ with $(TOOLCHAIN_TAG) ($$split)"; \
 	rm -rf toolchain && mkdir toolchain && git archive FETCH_HEAD | tar -x -C toolchain; \
-	cp toolchain/embed/toolchain.mk       template/build/toolchain.mk; \
-	cp toolchain/embed/fetch-toolchain.sh template/build/fetch-toolchain.sh; \
-	cp toolchain/build/versions.env       template/build/toolchain.lock; \
-	git add -A toolchain template/build/toolchain.mk template/build/fetch-toolchain.sh template/build/toolchain.lock; \
+	: 'The embed glue assumes the machinery dir is named build/; we vendor it'; \
+	: 'into .build/, so rewrite that path prefix as we copy (keeps the sync'; \
+	: 'robust no matter what the upstream toolchain names it). We also gate the'; \
+	: 'always-on "toolchain ready" summary behind YEET_TOOLCHAIN_QUIET so a'; \
+	: 'normal build stays quiet (pretty.mk sets it; V=1 shows it). If upstream'; \
+	: 'reworks that line the gate simply no-ops and the summary returns.'; \
+	sed 's|build/|.build/|g' toolchain/embed/toolchain.mk       > template/.build/toolchain.mk; \
+	sed -e 's|build/|.build/|g' \
+	    -e 's#^echo ">> toolchain ready:#[ -n "$${YEET_TOOLCHAIN_QUIET:-}" ] || echo ">> toolchain ready:#' \
+	    toolchain/embed/fetch-toolchain.sh > template/.build/fetch-toolchain.sh; \
+	cp toolchain/build/versions.env       template/.build/toolchain.lock; \
+	git add -A toolchain template/.build/toolchain.mk template/.build/fetch-toolchain.sh template/.build/toolchain.lock; \
 	if git diff --cached --quiet; then \
 		echo ">> already at $(TOOLCHAIN_TAG) — nothing to commit"; \
 	else \
