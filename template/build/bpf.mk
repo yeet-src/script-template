@@ -23,15 +23,37 @@ UNAME_M := $(shell uname -m)
 ARCH    := $(UNAME_M:x86_64=x86)
 ARCH    := $(ARCH:aarch64=arm64)
 
+# Paths defined on both platforms so `make clean-bpf` (rm-only) behaves the
+# same on a Mac. The compile/link rules that consume them live in the Linux
+# branch below.
 VMLINUX  := src/bpf/include/vmlinux.h
+BPF_OUT  := bin/probe.bpf.o
+
+# BPF objects only build on Linux: the vendored toolchain is Linux musl-static
+# (toolchain.mk no-ops the cache off-Linux) and there is no macOS bpftool/BTF.
+# Without this guard the build falls through to PATH and dies at "bpftool not
+# found — install bpftool", advice that can't be followed on a Mac. Fail fast
+# with the real fix instead: build inside a Linux VM. (This is a build target,
+# not vmlinux/clang, so it also catches `make bundle` etc. early.)
+UNAME_S := $(shell uname -s)
+ifeq ($(UNAME_S),Darwin)
+bpf:
+	@echo "error: BPF objects build on Linux only — macOS has no bpftool or kernel BTF." >&2
+	@echo "       Build inside a Linux VM, then run there. With the yeet Lima VM:" >&2
+	@echo "         limactl shell yeet.debian-13" >&2
+	@echo "         cd <project> && make && sudo yeet run -t ." >&2
+	@echo "       (esbuild-only bundle still works here: 'make bundle'.)" >&2
+	@exit 1
+.PHONY: bpf
+else
+
 BPF_SRCS := $(wildcard src/bpf/*.bpf.c)
 # One intermediate object per unit. They live under .build/ so they are
 # never mistaken for the loadable object in bin/.
 BPF_OBJS := $(patsubst src/bpf/%.bpf.c,.build/bpf/%.bpf.o,$(BPF_SRCS))
-# The single linked object. Its `.bpf.o` suffix is what the JS side loads
-# with `import probe from "../bin/probe.bpf.o"` (the loader's
-# BpfObjectRule matches on that suffix).
-BPF_OUT  := bin/probe.bpf.o
+# The single linked object (BPF_OUT, defined above) is what the JS side loads
+# with `import probe from "../bin/probe.bpf.o"` — the loader's BpfObjectRule
+# matches on that `.bpf.o` suffix.
 
 BPF_CFLAGS ?= -g -O2 -Wall -target bpf -D__TARGET_ARCH_$(ARCH) -mcpu=v3 -I src/bpf/include
 # Add the vendored libbpf program headers (<bpf/bpf_helpers.h>, …) when a
@@ -58,12 +80,6 @@ $(BPF_OUT): $(BPF_OBJS) | bin toolchain
 	@command -v $(BPFTOOL) >/dev/null 2>&1 || { echo "error: bpftool not found — install bpftool / linux-tools"; exit 1; }
 	$(BPFTOOL) gen object $@ $(BPF_OBJS)
 
-bin:
-	mkdir -p bin
-
-clean-bpf:
-	rm -rf $(BPF_OUT) .build $(VMLINUX)
-
 # Load the linked object with veristat to confirm THIS kernel's verifier
 # accepts every program, and to see per-program complexity (insns/states) — a
 # local counterpart to the kernel-matrix CI, which runs the same check across
@@ -82,6 +98,16 @@ veristat: $(BPF_OUT) | toolchain
 .PHONY: veristat-matrix
 veristat-matrix: $(BPF_OUT) | toolchain
 	VERISTAT="$(VERISTAT)" sh build/kernel-matrix.sh $(KERNELS)
+
+endif  # non-Darwin: real BPF/veristat rules. (Darwin gets the stub `bpf` above.)
+
+# clean-bpf / clangd stay on both platforms: rm/mkdir/printf need no BPF
+# toolchain, and clangd editor support is useful while editing .bpf.c on a Mac.
+bin:
+	mkdir -p bin
+
+clean-bpf:
+	rm -rf $(BPF_OUT) .build $(VMLINUX)
 
 # Write a local .clangd so the editor resolves vmlinux.h, the libbpf SDK
 # headers and __u* types using the *resolved* toolchain include path — unlike
