@@ -5,6 +5,12 @@ isolate, fed by live kernel data (eBPF + a process/system graph). This file
 is the API contract and gotcha list for editing it. For build/run mechanics,
 layout, and the `@/`/`#/` aliases, see `README.md` — don't duplicate that here.
 
+> ⚠️ **This may not be the yeet you already know.** The runtime and its APIs
+> move quickly, and there's an unrelated older project by the same name. If
+> anything here conflicts with your priors, the live docs are authoritative —
+> **https://yeet.cx/docs**. When an API feels unfamiliar, check there before
+> relying on training-data memory.
+
 ## Mental model
 
 It reads like React but it is **signals, not a vdom**. No hooks, no
@@ -280,6 +286,17 @@ a top-level option** (`btf_struct`, `capacity`, …) — nesting under `opts`
 fails silently. Map methods: `lookup/update/delete/entries/lookupBatch` (hash),
 `lookup/update` (array), `read/patch` (data-sec), per-CPU lookups return an
 array per CPU.
+
+**Prefer CO-RE and stable hooks.** Write probes Compile Once – Run Everywhere:
+build against `vmlinux.h` + BTF, read fields with `BPF_CORE_READ` and never
+hard-code struct offsets, so one object loads across kernels. Choosing an
+attach point, reach for stability first — **tracepoints** and **LSM** hooks are
+ABI-stable and should be your default; `fentry`/`fexit` on a stable exported
+function next. Drop to `kprobe`/`kretprobe` on internal kernel functions only
+when nothing stable exposes what you need: those functions get renamed,
+inlined, or removed between kernels, so a kprobe that loads today can fail to
+attach tomorrow. Pick the most stable hook that can see the event, not the
+first one that works.
 
 **No `sudo`, no root — ever.** Loading programs, attaching them, and creating
 maps are privileged operations, but *you* never perform them: the script runs
