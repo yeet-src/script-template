@@ -2,8 +2,12 @@
 # nothing is built here. Guard against stray artifacts if someone runs a
 # build inside template/ while editing it.
 template/node_modules/
-template/src/index.jsx
-template/.build/
+template/dist/
+# template/.build/ is the committed build machinery (the frontend Makefile,
+# *.mk, the shell scripts, toolchain.lock) that `scripts/new` materializes into
+# a generated project's own .build/ (which that project gitignores wholesale).
+# Only the artifacts written *inside* it are ignored here, not the machinery.
+template/.build/bpf/
 template/bin/*
 !template/bin/.gitkeep
 template/src/bpf/include/vmlinux.h

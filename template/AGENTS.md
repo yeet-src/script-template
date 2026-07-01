@@ -5,6 +5,12 @@ isolate, fed by live kernel data (eBPF + a process/system graph). This file
 is the API contract and gotcha list for editing it. For build/run mechanics,
 layout, and the `@/`/`#/` aliases, see `README.md` — don't duplicate that here.
 
+> ⚠️ **This may not be the yeet you already know.** The runtime and its APIs
+> move quickly, and there's an unrelated older project by the same name. If
+> anything here conflicts with your priors, the live docs are authoritative —
+> **https://yeet.cx/docs**. When an API feels unfamiliar, check there before
+> relying on training-data memory.
+
 ## Mental model
 
 It reads like React but it is **signals, not a vdom**. No hooks, no
@@ -40,7 +46,11 @@ blank panel could mean anything.
 Before any JSX, confirm the kernel actually gives you the fields and types you
 think it does. Guard a self-test with `import.meta.main` — it's `true` **only**
 when this module is the run entry, so the block runs when you point `yeet run`
-at the module and stays dormant once `main.jsx` imports it.
+at the module. The build bundles with `import.meta.main` defined to `false`, so
+these guards compile out of `dist/index.jsx` entirely — they never fire in the
+built app, only when you invoke the module directly. (Don't rely on plain
+`main.jsx` imports to keep them dormant: bundling collapses every module into
+one, so without that define they'd all see the entry's `main === true`.)
 
 Verify the **raw source**, not a `from()` signal (a `from()` producer doesn't
 run until something watches it — there's no UI here):
@@ -276,6 +286,25 @@ a top-level option** (`btf_struct`, `capacity`, …) — nesting under `opts`
 fails silently. Map methods: `lookup/update/delete/entries/lookupBatch` (hash),
 `lookup/update` (array), `read/patch` (data-sec), per-CPU lookups return an
 array per CPU.
+
+**Prefer CO-RE and stable hooks.** Write probes Compile Once – Run Everywhere:
+build against `vmlinux.h` + BTF, read fields with `BPF_CORE_READ` and never
+hard-code struct offsets, so one object loads across kernels. Choosing an
+attach point, reach for stability first — **tracepoints** and **LSM** hooks are
+ABI-stable and should be your default; `fentry`/`fexit` on a stable exported
+function next. Drop to `kprobe`/`kretprobe` on internal kernel functions only
+when nothing stable exposes what you need: those functions get renamed,
+inlined, or removed between kernels, so a kprobe that loads today can fail to
+attach tomorrow. Pick the most stable hook that can see the event, not the
+first one that works.
+
+**No `sudo`, no root — ever.** Loading programs, attaching them, and creating
+maps are privileged operations, but *you* never perform them: the script runs
+inside **yeetd**, and the `yeet` CLI holds no privilege of its own — it hands
+the privileged work to the daemon, which carries the delegated BPF capability.
+So BPF runs with the daemon's authorization, not yours. Run `yeet run` /
+`yeet build` as your normal user; if something needs elevation, that's a daemon
+setup concern, never a reason to re-run the CLI under root.
 
 ## Input — global `tty`
 

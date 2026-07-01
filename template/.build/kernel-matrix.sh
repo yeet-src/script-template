@@ -1,10 +1,10 @@
 #!/bin/sh
-# Boot a matrix of kernels locally and run the verifier check (build/verify-
+# Boot a matrix of kernels locally and run the verifier check (.build/verify-
 # kernel.sh) in each — the local counterpart to .github/workflows/kernel-
 # matrix.yml. This is a TEST HARNESS, not part of the build, and needs a
 # Linux host (ideally with /dev/kvm; without it QEMU falls back to slow TCG).
 #
-#   build/kernel-matrix.sh [kernel ...]      # default: an LTS spread + bpf-next
+#   .build/kernel-matrix.sh [kernel ...]      # default: an LTS spread + bpf-next
 #   make veristat-matrix                      # same, via the Makefile
 #
 # It uses cilium's lvh + QEMU to boot quay.io/lvh-images/kind:<kernel> images.
@@ -12,7 +12,7 @@
 # host KVM/root, not self-contained build tools), so both are fetched on demand:
 #   - lvh:  an `lvh` on PATH, else extracted from the quay.io/lvh-images/lvh image.
 #   - qemu: the vendored static qemu-<arch>.tar.gz from the toolchain release
-#           (checksum-pinned in build/toolchain.lock), extracted to the toolchain
+#           (checksum-pinned in .build/toolchain.lock), extracted to the toolchain
 #           cache and prepended to PATH; falls back to a system qemu-system.
 # veristat is the vendored static binary, resolved like the build.
 
@@ -46,8 +46,8 @@ need ssh "install openssh-client"
 # fall back to a system qemu-system on PATH. lvh finds qemu via PATH and the
 # static qemu finds its firmware blobs relative to its own binary, so we just
 # prepend the extracted bin dir to PATH — no -L plumbing into lvh needed.
-if [ -f build/toolchain.lock ]; then
-	. ./build/toolchain.lock
+if [ -f .build/toolchain.lock ]; then
+	. ./.build/toolchain.lock
 	qsha="$(eval "printf '%s' \"\${QEMU_SHA256_${ARCH}:-}\"")"
 	QDIR="${XDG_CACHE_HOME:-$HOME/.cache}/yeet/toolchain/v${TOOLCHAIN_VERSION}/${ARCH}/qemu"
 	if [ ! -x "$QDIR/bin/$QEMU" ] && [ -n "$qsha" ] && [ -n "${TOOLCHAIN_BASE_URL:-}" ]; then
@@ -70,7 +70,7 @@ if [ -f build/toolchain.lock ]; then
 		echo ">> using vendored static qemu: $QDIR/bin/$QEMU"
 	fi
 fi
-need "$QEMU" "no vendored qemu in build/toolchain.lock and none on PATH — bump the lock to a toolchain that ships qemu, or install qemu-system"
+need "$QEMU" "no vendored qemu in .build/toolchain.lock and none on PATH — bump the lock to a toolchain that ships qemu, or install qemu-system"
 
 # --- resolve lvh (PATH, else extract from the OCI image with docker) ----------
 LVH="$(command -v lvh || true)"
@@ -91,12 +91,12 @@ fi
 echo ">> building $OBJ"
 make bpf >/dev/null
 VERISTAT="${VERISTAT:-}"
-if [ -z "$VERISTAT" ] && [ -f build/toolchain.lock ]; then
-	. ./build/toolchain.lock
+if [ -z "$VERISTAT" ] && [ -f .build/toolchain.lock ]; then
+	. ./.build/toolchain.lock
 	VERISTAT="${XDG_CACHE_HOME:-$HOME/.cache}/yeet/toolchain/v${TOOLCHAIN_VERSION}/${ARCH}/veristat"
 fi
 [ -n "$VERISTAT" ] && [ -x "$VERISTAT" ] || VERISTAT="$(command -v veristat || true)"
-[ -n "$VERISTAT" ] && [ -x "$VERISTAT" ] || { echo "error: veristat not found — bump build/toolchain.lock to a toolchain that ships it, or install veristat" >&2; exit 1; }
+[ -n "$VERISTAT" ] && [ -x "$VERISTAT" ] || { echo "error: veristat not found — bump .build/toolchain.lock to a toolchain that ships it, or install veristat" >&2; exit 1; }
 install -Dm755 "$VERISTAT" bin/veristat
 
 # --- per-kernel: pull image, boot, verify, stop -------------------------------
@@ -129,7 +129,7 @@ for k in $KERNELS; do
 
 	# run the gate in the VM; CSV lands in the host-mounted .kmatrix via /host
 	if ssh -p "$SSH_PORT" -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null root@127.0.0.1 \
-		"cd /host && OUT_CSV=/host/.kmatrix/$k.csv sh build/verify-kernel.sh"; then :; else overall=1; fi
+		"cd /host && OUT_CSV=/host/.kmatrix/$k.csv sh .build/verify-kernel.sh"; then :; else overall=1; fi
 	stop_vm
 done
 trap - EXIT INT TERM

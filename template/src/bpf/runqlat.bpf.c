@@ -60,10 +60,12 @@ int on_switch_lat(struct trace_event_raw_sched_switch *ctx)
 	__u64 delta = bpf_ktime_get_ns() - *tsp;
 	bpf_map_delete_elem(&runq_start, &pid);
 
-	// slot = floor(log2(delta_ns))
+	// slot = floor(log2(delta_ns)). A bounded loop (≤ MAX_SLOTS iterations):
+	// modern verifiers accept these directly, so it needs no `#pragma unroll`
+	// — which couldn't unroll it anyway (the data-dependent break makes the
+	// trip count non-constant) and only produced a warning.
 	__u32 slot = 0;
 	__u64 d = delta;
-#pragma unroll
 	for (int i = 0; i < MAX_SLOTS; i++) {
 		if (d <= 1) {
 			break;

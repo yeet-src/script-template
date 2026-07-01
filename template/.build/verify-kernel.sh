@@ -5,7 +5,7 @@
 # kernel with cilium's little-vm-helper and mounts the project at /host; the
 # workflow stages the static veristat into bin/ before booting.
 #
-#   sh build/verify-kernel.sh [bpf-object]   (default: bin/probe.bpf.o)
+#   sh .build/verify-kernel.sh [bpf-object]   (default: bin/probe.bpf.o)
 #
 # Set OUT_CSV=<path> to also write a machine-readable result (file,prog,verdict,
 # insns,states) — the workflow points it at the mounted workspace so the runner
