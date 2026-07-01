@@ -1,9 +1,9 @@
 # Resolve the static build toolchain (clang, bpftool, veristat, esbuild, git, gh) — included
-# by the project Makefile before build/bpf.mk, so the tools are set before any
+# by the project Makefile before .build/bpf.mk, so the tools are set before any
 # rule uses them. A `make CLANG=…` CLI override beats this.
 #
 # Tools come from a shared, per-machine cache keyed by the project's pinned
-# toolchain version (build/toolchain.lock). `make toolchain` fills it,
+# toolchain version (.build/toolchain.lock). `make toolchain` fills it,
 # downloading each missing tool once from the vendored toolchain release
 # (github.com/yeet-src/toolchain). The cache key is the toolchain version,
 # never the template version — so updating the template reuses an existing
@@ -24,7 +24,7 @@ UNAME_M := $(UNAME_M:arm64=aarch64)
 # Only engage the vendored cache on Linux; elsewhere TOOLCHAIN_LOCK stays empty
 # so the PATH fallbacks below win and the fetch targets become no-ops.
 ifeq ($(UNAME_S),Linux)
-TOOLCHAIN_LOCK := $(firstword $(wildcard build/toolchain.lock))
+TOOLCHAIN_LOCK := $(firstword $(wildcard .build/toolchain.lock))
 endif
 ifneq ($(TOOLCHAIN_LOCK),)
   include $(TOOLCHAIN_LOCK)
@@ -53,7 +53,7 @@ GH       ?= gh
 .PHONY: toolchain
 toolchain:
 ifneq ($(TOOLCHAIN_LOCK),)
-	@sh build/fetch-toolchain.sh "$(TOOLCHAIN_DIR)" "$(UNAME_M)" "$(TOOLCHAIN_LOCK)"
+	@sh .build/fetch-toolchain.sh "$(TOOLCHAIN_DIR)" "$(UNAME_M)" "$(TOOLCHAIN_LOCK)"
 else
 	@:
 endif
@@ -63,7 +63,7 @@ endif
 .PHONY: vendored-git
 vendored-git:
 ifneq ($(TOOLCHAIN_LOCK),)
-	@sh build/fetch-toolchain.sh "$(TOOLCHAIN_DIR)" "$(UNAME_M)" "$(TOOLCHAIN_LOCK)" git \
+	@sh .build/fetch-toolchain.sh "$(TOOLCHAIN_DIR)" "$(UNAME_M)" "$(TOOLCHAIN_LOCK)" git \
 		|| echo "note: vendored git unavailable; postgen will fall back to host git" >&2
 else
 	@:

@@ -66,18 +66,24 @@ jobs:
       - name: Build BPF object + stage veristat
         run: |
           set -euo pipefail
+          # NOTE: the build machinery lives under .build/, which this project
+          # gitignores (it's regenerable — `yeet build` materializes it). A CI
+          # checkout therefore only has it if you commit it (`git add -f .build`)
+          # or add a step that runs `yeet build` first. `make bpf` below drives
+          # it through the root Makefile shim once .build/ is present.
+          #
           # Builds bin/probe.bpf.o with the vendored static toolchain, also
           # populating the per-machine toolchain cache (clang/bpftool/veristat).
           make bpf
 
-          # Resolve the vendored static veristat the same way build/toolchain.mk
+          # Resolve the vendored static veristat the same way .build/toolchain.mk
           # does, and stage it into bin/ so the VM finds it under /host. It is
           # fully static, so it runs in any kernel image's rootfs.
-          . build/toolchain.lock
+          . .build/toolchain.lock
           arch="$(uname -m)"; [ "$arch" = arm64 ] && arch=aarch64
           cache="${XDG_CACHE_HOME:-$HOME/.cache}/yeet/toolchain/v${TOOLCHAIN_VERSION}/${arch}"
           if [ ! -x "$cache/veristat" ]; then
-            echo "::error::veristat is not in the pinned toolchain (v${TOOLCHAIN_VERSION}). Bump build/toolchain.lock to a toolchain release that ships veristat."
+            echo "::error::veristat is not in the pinned toolchain (v${TOOLCHAIN_VERSION}). Bump .build/toolchain.lock to a toolchain release that ships veristat."
             exit 1
           fi
           install -Dm755 "$cache/veristat" bin/veristat
@@ -93,7 +99,7 @@ jobs:
           install-dependencies: 'true'
           cmd: |
             cd /host
-            OUT_CSV=/host/.kmatrix/result.csv sh build/verify-kernel.sh
+            OUT_CSV=/host/.kmatrix/result.csv sh .build/verify-kernel.sh
 
       - name: Render kernel summary
         if: always()

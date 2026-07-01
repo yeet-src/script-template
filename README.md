@@ -9,7 +9,7 @@ make new DEST=<dir> [NAME=<name>]      # or: scripts/new <dir> [name]
 The static build toolchain (clang, bpftool, esbuild, make, git) lives in its own
 repo, [yeet-src/toolchain](https://github.com/yeet-src/toolchain), vendored here
 under `toolchain/` and pinned to a release tag. Generated projects don't read
-`toolchain/` — they carry their own copies under `template/build/` (the embed
+`toolchain/` — they carry their own copies under `template/.build/` (the embed
 glue + a `toolchain.lock`). Refresh both from a toolchain release with:
 
 ```sh

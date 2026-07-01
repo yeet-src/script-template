@@ -1,12 +1,17 @@
 # build artifacts
 /node_modules/
-/src/index.jsx
-/.build/
+# Compiled JS bundle (the `yeet build` output the runtime prefers over src/).
+/dist/
+# Compiled BPF intermediates. The rest of .build/ is the build back end
+# (Makefile, *.mk, scripts, toolchain.lock); `yeet new` ignores that wholesale
+# too (it appends `/.build/` here — the back end is regenerable), but this
+# repo's own template keeps it committed as the source to materialize from.
+/.build/bpf/
 
 # compiled BPF objects + generated CO-RE header
 /bin/*
 !/bin/.gitkeep
 /src/bpf/include/vmlinux.h
 
-# kernel-matrix run output (build/kernel-matrix.sh)
+# kernel-matrix run output (.build/kernel-matrix.sh)
 /.kmatrix/

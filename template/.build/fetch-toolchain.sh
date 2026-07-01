@@ -4,7 +4,7 @@
 # toolchain repo (releases/download/v<TOOLCHAIN_VERSION>/) and is
 # checksum-verified against the pins in the lock.
 #
-#   build/fetch-toolchain.sh <dest-dir> <uname-arch> <lock> [tool...]
+#   .build/fetch-toolchain.sh <dest-dir> <uname-arch> <lock> [tool...]
 #
 # With no trailing tool names, all tools are fetched (the build's `toolchain`
 # target). Pass names (e.g. `git`) to fetch only those — `postgen` uses this to
@@ -95,4 +95,4 @@ if want headers && [ ! -e "$INC/bpf/bpf_helpers.h" ]; then
 	rm -rf "$td"
 fi
 
-echo ">> toolchain ready: $DIR${FILTER:+ ($FILTER)}"
+[ -n "${YEET_TOOLCHAIN_QUIET:-}" ] || echo ">> toolchain ready: $DIR${FILTER:+ ($FILTER)}"

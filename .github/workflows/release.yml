@@ -101,7 +101,7 @@ jobs:
           # The static toolchain lives in its own repo (yeet-src/toolchain) and
           # is fetched on demand into a per-machine cache, so nothing heavy
           # ships in this archive. The toolchain/ subtree is dev-time source
-          # only (build recipe + embed glue) — the payload under template/build/
+          # only (build recipe + embed glue) — the payload under template/.build/
           # already carries its synced copies, so exclude it from the archive.
           repo="${GITHUB_REPOSITORY##*/}"
           tar \

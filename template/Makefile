@@ -1,66 +1,22 @@
-# Build the yeet script project.
+# Thin shim → the real build machinery under .build/.
 #
-#   make         — build everything (BPF objects + JS bundle)
-#   make bpf     — compile bpf/*.bpf.c into bin/* only
-#   make veristat — load the built object with veristat (verifier check on this kernel)
-#   make bundle  — bundle the JS entry with esbuild
-#   make postgen — finalize a freshly generated project (git init)
-#   make clangd  — write a local .clangd pointing at the resolved toolchain
-#   make clean   — remove build artifacts
+# `yeet build` is the frontend for this script; the low-level orchestration
+# (this project's two compilers — clang for BPF, esbuild for JS — plus the
+# toolchain resolution and the kernel test harness) lives under .build/, which
+# a generated project gitignores wholesale and `yeet build` materializes. This
+# shim just forwards a bare `make` (and the `make` that `yeet run` invokes
+# automatically) to .build/Makefile, keeping the project root as the working
+# directory so every path inside resolves as written.
 #
-# This is the build *frontend*: it orchestrates two independent
-# compilers — clang for the BPF objects, esbuild for the JS bundle.
-# Neither understands the other; the JS references compiled objects in
-# bin/ only by path, resolved at runtime. `yeet run` invokes `make`
-# automatically when running this project from a trusted remote source,
-# so the default goal must leave the project runnable.
-#
-# clang, bpftool and esbuild come from the static toolchain resolved by
-# build/toolchain.mk (a shared per-machine cache, or binaries vendored in
-# the bootstrap repo) — so the build needs no system C/BPF toolchain.
+# Command-line variables (e.g. `make veristat-matrix KERNELS="6.6-main"`) and
+# overrides (`make CLANG=…`) propagate to the sub-make automatically via
+# MAKEFLAGS, so they need no plumbing here.
+
+REAL := .build/Makefile
 
 .DEFAULT_GOAL := all
 
-include build/toolchain.mk
-include build/bpf.mk
+all bpf bundle veristat veristat-matrix postgen clangd clean:
+	@$(MAKE) --no-print-directory -f $(REAL) $@
 
-all: bpf bundle
-
-# Bundle the entry with the vendored esbuild. esbuild honors tsconfig `paths`
-# (so `@/` resolves at bundle time), while `yeet:*` builtins and `*.bpf.o`
-# objects stay external. The bundle is written to src/index.jsx, which the
-# entry ladder prefers over src/main.jsx — so once built, that is what runs.
-# The .jsx extension keeps the bundle eligible for component auto-mount.
-# Compiled BPF objects in bin/ are loaded by path at runtime, never imported,
-# so they are not bundled.
-#
-# The build needs no npm/node: the starter imports only `yeet:*` builtins and
-# local `@/` modules, which esbuild resolves on its own. If you add third-party
-# packages to package.json, install them into node_modules with the package
-# manager of your choice — esbuild inlines whatever it finds there.
-ESBUILD_FLAGS := --bundle --format=esm --platform=neutral \
-	--main-fields=module,main --conditions=import,module \
-	--outfile=src/index.jsx --jsx=automatic --jsx-import-source=yeet:tui
-
-bundle: | toolchain
-	$(ESBUILD) src/main.jsx $(ESBUILD_FLAGS) '--external:yeet:*' '--external:*.bpf.o'
-
-# Post-generation finalize: initialize a git repository with the vendored git
-# (fetched via `vendored-git`). Idempotent — skipped if this is already a repo.
-# The scaffolders (`yeet new`, `scripts/new`) run `make postgen` after creating
-# the project, so the CLI itself stays a thin caller of make.
-postgen: | vendored-git
-	@g="$(GIT)"; [ -x "$$g" ] || g="$$(command -v git 2>/dev/null || true)"; \
-	if [ -e .git ]; then \
-		echo "postgen: already a git repository"; \
-	elif [ -n "$$g" ]; then \
-		echo "postgen: git init"; \
-		"$$g" -c init.templateDir= init -q . || echo "warning: 'git init' failed" >&2; \
-	else \
-		echo "warning: no git available (vendored or host); skipping 'git init'" >&2; \
-	fi
-
-clean: clean-bpf
-	rm -rf node_modules dist src/index.jsx
-
-.PHONY: all bundle clean postgen
+.PHONY: all bpf bundle veristat veristat-matrix postgen clangd clean

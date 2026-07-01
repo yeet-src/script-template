@@ -2,7 +2,7 @@
 # Generate vmlinux.h from the running kernel's BTF — the CO-RE header
 # every BPF program in this project includes.
 #
-#   build/gen-vmlinux.sh <bpftool> <output-path>
+#   .build/gen-vmlinux.sh <bpftool> <output-path>
 
 set -eu
 
@@ -15,5 +15,11 @@ if [ ! -r /sys/kernel/btf/vmlinux ]; then
 fi
 
 mkdir -p "$(dirname "$OUT")"
-"$BPFTOOL" btf dump file /sys/kernel/btf/vmlinux format c >"$OUT"
+# bpftool prints a benign "skipping /sys/kernel/btf/vmlinux (will be loaded as
+# base)" note to stderr even on success. Capture stderr and replay it only if
+# the dump actually fails, so a normal build stays quiet.
+if ! err="$("$BPFTOOL" btf dump file /sys/kernel/btf/vmlinux format c 2>&1 >"$OUT")"; then
+	[ -n "$err" ] && printf '%s\n' "$err" >&2
+	exit 1
+fi
 echo "generated $OUT"
