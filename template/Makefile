@@ -40,6 +40,7 @@ all: bpf bundle
 # manager of your choice — esbuild inlines whatever it finds there.
 ESBUILD_FLAGS := --bundle --format=esm --platform=neutral \
 	--main-fields=module,main --conditions=import,module \
+	--define:import.meta.main=false \
 	--outfile=src/index.jsx --jsx=automatic --jsx-import-source=yeet:tui
 
 bundle: | toolchain
