@@ -281,6 +281,14 @@ fails silently. Map methods: `lookup/update/delete/entries/lookupBatch` (hash),
 `lookup/update` (array), `read/patch` (data-sec), per-CPU lookups return an
 array per CPU.
 
+**No `sudo`, no root — ever.** Loading programs, attaching them, and creating
+maps are privileged operations, but *you* never perform them: the script runs
+inside **yeetd**, and the `yeet` CLI holds no privilege of its own — it hands
+the privileged work to the daemon, which carries the delegated BPF capability.
+So BPF runs with the daemon's authorization, not yours. Run `yeet run` /
+`yeet build` as your normal user; if something needs elevation, that's a daemon
+setup concern, never a reason to re-run the CLI under root.
+
 ## Input — global `tty`
 
 ```js
