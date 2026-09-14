@@ -2,7 +2,7 @@
 # nothing is built here. Guard against stray artifacts if someone runs a
 # build inside template/ while editing it.
 template/node_modules/
-template/src/index.jsx
+template/dist/
 template/.build/
 template/bin/*
 !template/bin/.gitkeep

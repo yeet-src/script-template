@@ -28,8 +28,9 @@ all: bpf bundle
 
 # Bundle the entry with the vendored esbuild. esbuild honors tsconfig `paths`
 # (so `@/` resolves at bundle time), while `yeet:*` builtins and `*.bpf.o`
-# objects stay external. The bundle is written to src/index.jsx, which the
-# entry ladder prefers over src/main.jsx — so once built, that is what runs.
+# objects stay external. The bundle is written to dist/index.jsx: the entry
+# ladder tries dist/ before src/, so once built, that is what runs — and the
+# generated file stays out of the source tree (dist/ is gitignored).
 # The .jsx extension keeps the bundle eligible for component auto-mount.
 # Compiled BPF objects in bin/ are loaded by path at runtime, never imported,
 # so they are not bundled.
@@ -41,7 +42,7 @@ all: bpf bundle
 ESBUILD_FLAGS := --bundle --format=esm --platform=neutral \
 	--main-fields=module,main --conditions=import,module \
 	--define:import.meta.main=false \
-	--outfile=src/index.jsx --jsx=automatic --jsx-import-source=yeet:tui
+	--outfile=dist/index.jsx --jsx=automatic --jsx-import-source=yeet:tui
 
 bundle: | toolchain
 	$(ESBUILD) src/main.jsx $(ESBUILD_FLAGS) '--external:yeet:*' '--external:*.bpf.o'
@@ -62,6 +63,6 @@ postgen: | vendored-git
 	fi
 
 clean: clean-bpf
-	rm -rf node_modules dist src/index.jsx
+	rm -rf node_modules dist
 
 .PHONY: all bundle clean postgen
