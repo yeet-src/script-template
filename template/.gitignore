@@ -1,6 +1,6 @@
-# build artifacts
+# build artifacts (the esbuild bundle lands in dist/index.jsx)
 /node_modules/
-/src/index.jsx
+/dist/
 /.build/
 
 # compiled BPF objects + generated CO-RE header
