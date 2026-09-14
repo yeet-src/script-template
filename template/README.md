@@ -50,6 +50,7 @@ src/lib/format.js     pure render helpers (rate, duration, heat color)
 src/bpf/cpusched.bpf.c  sched_switch program + the runtime knob
 src/bpf/runqlat.bpf.c   wakeup→on-CPU latency histogram
 bin/                  the linked BPF object lands here
+dist/                 the esbuild JS bundle lands here (gitignored)
 .github/workflows/kernel-matrix.yml  CI: verify the object across kernels
 build/verify-kernel.sh  the in-VM gate that workflow runs
 ```
@@ -63,12 +64,12 @@ the `@/` alias; `main.jsx` wires them together and owns input.
 
 ```sh
 make           # compile BPF (clang + bpftool) + bundle JS (esbuild)
-yeet run .     # runs the bundled src/index.jsx (needs root for BPF)
+yeet run .     # runs the bundled dist/index.jsx (needs root for BPF)
 ```
 
 `make` runs two independent compilers: **clang + bpftool** compile
 `src/bpf/*.bpf.c` and link them into one loadable object `bin/probe.bpf.o`;
-**esbuild** bundles `src/main.jsx` into `src/index.jsx`, resolving the `@/`
+**esbuild** bundles `src/main.jsx` into `dist/index.jsx`, resolving the `@/`
 alias (and inlining any npm/jsr deps you add) and leaving `yeet:*` builtins
 external. esbuild is vendored by the toolchain, so the build needs no
 node/npm.
