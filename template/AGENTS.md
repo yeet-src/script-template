@@ -270,8 +270,11 @@ const hist = new ArrayMap(ctl, "runq_hist");   // poll: await hist.lookup(i)
 const knobs = new DataSec(ctl, "probe.data");  // write: knobs.patch({ field: … })
 ```
 
-`kind` values: `ringbuf`, `hash-map`, `lru-hash-map`, `array`, `percpu-*`,
-`lpm-trie`, `bloom-filter`, `data`. In `.bind()`, **every key except `kind` is
+`kind` values: `ringbuf`, `hash`, `lru_hash`, `array`, `percpu_hash`,
+`lru_percpu_hash`, `percpu_array`, `lpm_trie`, `bloom_filter`, `data`. Use
+underscores: the daemon also takes `hash_map` and `hashmap` forms but rejects
+hyphenated ones, and the error you get is `No service for map`.
+In `.bind()`, **every key except `kind` is
 a top-level option** (`btf_struct`, `capacity`, …) — nesting under `opts`
 fails silently. Map methods: `lookup/update/delete/entries/lookupBatch` (hash),
 `lookup/update` (array), `read/patch` (data-sec), per-CPU lookups return an
