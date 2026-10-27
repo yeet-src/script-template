@@ -5,24 +5,23 @@
 #      Compiling cpusched.bpf.c
 #      Compiling runqlat.bpf.c
 #        Linking bin/probe.bpf.o
-#       Bundling src/main.jsx
+#       Bundling src/main.jsx -> dist/index.jsx (15.5kb)
 #       Finished build in 0.84s
 #
 # A bold green verb, right-aligned to 12 columns, then the message — on
-# stderr, like cargo, so the build's stdout stays clean for piping. Each
-# command is echoed under its status line, so the exact invocation is always
-# on screen; `make QUIET=1` hides the commands and keeps only the status lines.
-# Color is used only when stderr is a terminal, TERM isn't dumb and
+# stderr, like cargo, so the build's stdout stays clean for piping. The
+# commands themselves are hidden; `make V=1` echoes each one under its status
+# line. Color is used only when stderr is a terminal, TERM isn't dumb and
 # NO_COLOR (https://no-color.org) is unset. Compiler diagnostics pass through
 # untouched, so a warning or error is never hidden.
 #
 # Included first by the project Makefile, so build/toolchain.mk and
 # build/bpf.mk can use `$(Q)` and `$(call status,Verb,message)`.
 
-ifeq ($(QUIET),1)
-  Q := @
-else
+ifeq ($(V),1)
   Q :=
+else
+  Q := @
 endif
 
 COLOR := $(shell [ -t 2 ] && [ -z "$$NO_COLOR" ] && [ "$$TERM" != dumb ] && echo 1)
