@@ -3,7 +3,7 @@
 # vendored static veristat and fails if the running kernel's verifier rejects
 # any program. Driven by .github/workflows/kernel-matrix.yml, which boots each
 # kernel with cilium's little-vm-helper and mounts the project at /host; the
-# workflow stages the static veristat into bin/ before booting.
+# workflow stages the static veristat into .kmatrix/ before booting.
 #
 #   sh build/verify-kernel.sh [bpf-object]   (default: bin/probe.bpf.o)
 #
@@ -19,7 +19,7 @@
 set -eu
 
 OBJ="${1:-bin/probe.bpf.o}"
-VERISTAT="${VERISTAT:-./bin/veristat}"
+VERISTAT="${VERISTAT:-./.kmatrix/veristat}"
 # verdict LAST so the gate below can match it at end-of-line. veristat's CSV
 # header uses each stat's canonical name, so the columns come out as
 # file_name,prog_name,total_insns,total_states,verdict.

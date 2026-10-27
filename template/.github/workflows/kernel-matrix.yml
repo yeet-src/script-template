@@ -71,8 +71,9 @@ jobs:
           make bpf
 
           # Resolve the vendored static veristat the same way build/toolchain.mk
-          # does, and stage it into bin/ so the VM finds it under /host. It is
-          # fully static, so it runs in any kernel image's rootfs.
+          # does, and stage it into .kmatrix/ (the matrix workspace, not bin/,
+          # which holds only build products) so the VM finds it under /host.
+          # It is fully static, so it runs in any kernel image's rootfs.
           . build/toolchain.lock
           arch="$(uname -m)"; [ "$arch" = arm64 ] && arch=aarch64
           cache="${XDG_CACHE_HOME:-$HOME/.cache}/yeet/toolchain/v${TOOLCHAIN_VERSION}/${arch}"
@@ -80,8 +81,8 @@ jobs:
             echo "::error::veristat is not in the pinned toolchain (v${TOOLCHAIN_VERSION}). Bump build/toolchain.lock to a toolchain release that ships veristat."
             exit 1
           fi
-          install -Dm755 "$cache/veristat" bin/veristat
-          file bin/veristat bin/probe.bpf.o
+          install -Dm755 "$cache/veristat" .kmatrix/veristat
+          file .kmatrix/veristat bin/probe.bpf.o
 
       - name: Verify on kernel ${{ matrix.kernel }}
         uses: cilium/little-vm-helper@v0.0.30

@@ -14,7 +14,7 @@ set -eu
 
 # Status lines in the build's format (STATUS_FMT comes from the Makefile; the
 # default matches it uncolored). curl shows a progress bar only on a terminal.
-status() { printf "${STATUS_FMT:-%12s %s\n}" "$1" "$2" >&2; }
+status() { printf "${STATUS_FMT:-* %-10s %s\n}" "$1" "$2" >&2; }
 if [ -t 2 ]; then CURL_PROGRESS=--progress-bar; else CURL_PROGRESS=-s; fi
 
 DIR="${1:?usage: fetch-toolchain.sh <dest-dir> <arch> <lock> [tool...]}"
@@ -71,7 +71,7 @@ fetch_bin() {
 	name="$1"
 	want "$name" || return 0
 	[ -x "$DIR/$name" ] && return 0
-	status Downloading "${name} (${ARCH}, v${TOOLCHAIN_VERSION})"
+	status download "${name} (${ARCH}, v${TOOLCHAIN_VERSION})"
 	tmp="$DIR/.${name}.$$"
 	curl -fSL $CURL_PROGRESS --retry 3 -o "$tmp" "${REL}/${name}-${ARCH}"
 	verify "$tmp" "$(get_sha "$(echo "$name" | tr a-z A-Z)")" "$name" || { rm -f "$tmp"; exit 1; }
@@ -91,7 +91,7 @@ fetch_bin gh
 # per-arch tool dirs ($key/include/bpf/*.h).
 INC="$(dirname "$DIR")/include"
 if want headers && [ ! -e "$INC/bpf/bpf_helpers.h" ]; then
-	status Downloading "libbpf headers (v${TOOLCHAIN_VERSION})"
+	status download "libbpf headers (v${TOOLCHAIN_VERSION})"
 	td="$(mktemp -d)"
 	curl -fSL $CURL_PROGRESS --retry 3 -o "$td/h.tgz" "${REL}/libbpf-headers.tar.gz"
 	verify "$td/h.tgz" "${LIBBPF_HEADERS_SHA256:-}" "libbpf-headers" || { rm -rf "$td"; exit 1; }
@@ -100,4 +100,4 @@ if want headers && [ ! -e "$INC/bpf/bpf_helpers.h" ]; then
 	rm -rf "$td"
 fi
 
-status Toolchain "$DIR${FILTER:+ ($FILTER)}"
+status toolchain "$DIR${FILTER:+ ($FILTER)}"

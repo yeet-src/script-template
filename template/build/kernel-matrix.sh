@@ -92,8 +92,11 @@ fi
 [ -e /dev/kvm ] && ACCEL="--cpu-kind host" || { ACCEL="--no-hw-accel"; echo "note: /dev/kvm absent — running under TCG emulation (slow)"; }
 
 # --- build the object and stage the vendored static veristat ------------------
+# veristat goes into .kmatrix/ (the run's workspace, gitignored), not bin/,
+# which holds only build products and is removed by `make clean`.
 echo ">> building $OBJ"
 make bpf >/dev/null
+OUTDIR="$PWD/.kmatrix"; rm -rf "$OUTDIR"; mkdir -p "$OUTDIR"
 VERISTAT="${VERISTAT:-}"
 if [ -z "$VERISTAT" ] && [ -f build/toolchain.lock ]; then
 	. ./build/toolchain.lock
@@ -101,11 +104,10 @@ if [ -z "$VERISTAT" ] && [ -f build/toolchain.lock ]; then
 fi
 [ -n "$VERISTAT" ] && [ -x "$VERISTAT" ] || VERISTAT="$(command -v veristat || true)"
 [ -n "$VERISTAT" ] && [ -x "$VERISTAT" ] || { echo "error: veristat not found — bump build/toolchain.lock to a toolchain that ships it, or install veristat" >&2; exit 1; }
-install -Dm755 "$VERISTAT" bin/veristat
+install -Dm755 "$VERISTAT" "$OUTDIR/veristat"
 
 # --- per-kernel: pull image, boot, verify, stop -------------------------------
 WORK="$(mktemp -d)"
-OUTDIR="$PWD/.kmatrix"; rm -rf "$OUTDIR"; mkdir -p "$OUTDIR"
 overall=0
 
 stop_vm() { printf 'quit\n' | { nc -N 127.0.0.1 "$MON_PORT" 2>/dev/null || nc 127.0.0.1 "$MON_PORT" 2>/dev/null; } || true; sleep 1; }

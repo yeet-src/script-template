@@ -5,10 +5,6 @@
 
 set -eu
 
-# Force the C locale so the [a-z0-9._-] range below means ASCII — under
-# some locales the collation order folds uppercase into [a-z].
-export LC_ALL=C
-
 # Resolve the template relative to this script (which lives in scripts/),
 # so it works from any working directory.
 SRC="$(cd "$(dirname "$0")/.." && pwd)/template"
@@ -20,13 +16,15 @@ if [ -z "$DEST" ]; then
 fi
 NAME="${2:-$(basename "$DEST")}"
 
-# npm package names: lowercase letters, digits, dash, underscore, dot.
-case "$NAME" in
-	*[!a-z0-9._-]*)
-		echo "error: invalid project name '$NAME' (use [a-z0-9._-])" >&2
-		exit 1
-		;;
-esac
+# npm package names: lowercase letters, digits, dash, underscore, dot. The
+# check runs in the C locale so the [a-z0-9._-] range means ASCII — under
+# some locales the collation order folds uppercase into [a-z]. Only the check:
+# the rest of the script (and the make it calls) keeps the user's locale so
+# the output marks match the build's.
+if printf '%s' "$NAME" | LC_ALL=C grep -q '[^a-z0-9._-]'; then
+	echo "error: invalid project name '$NAME' (use [a-z0-9._-])" >&2
+	exit 1
+fi
 
 if [ ! -d "$SRC" ]; then
 	echo "error: template/ not found — nothing to copy" >&2
@@ -57,6 +55,15 @@ done
 
 # Finalize via the project's Makefile (git init with the vendored git). The
 # generation logic lives in `make postgen`, not here — this just calls it.
-make -C "$DEST" postgen || echo "warning: 'make postgen' failed" >&2
+make --no-print-directory -C "$DEST" postgen || echo "warning: 'make postgen' failed" >&2
 
-echo "created '$NAME' in $DEST — cd there, run 'yeet build', then 'yeet run'"
+# Match the project's build output (build/ui.mk): a row with a tag column,
+# marks in UTF-8 locales only, color only on a terminal.
+if [ -t 2 ] && [ -z "${NO_COLOR:-}" ] && [ "${TERM:-}" != dumb ]; then
+	fmt='\033[1;32m%s\033[0m \033[1;36m%-10s\033[0m %s\n'
+else
+	fmt='%s %-10s %s\n'
+fi
+case "$(locale charmap 2>/dev/null)" in UTF-8) ok=✔ ;; *) ok=+ ;; esac
+printf "$fmt" "$ok" created "$NAME  $DEST" >&2
+printf "$fmt" ' ' next "cd $DEST && make && yeet run ." >&2
