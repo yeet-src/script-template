@@ -32,9 +32,9 @@
 # Status-line formats, normally set by the project's build/ui.mk (included
 # before this file); these fallbacks keep the glue usable on its own. Exported
 # so build/fetch-toolchain.sh prints the same way.
-STATUS_FMT ?= %12s %s\n
-WARN_FMT   ?= warning: %s\n
-ERROR_FMT  ?= error: %s\n
+STATUS_FMT ?= * %-10s %s\n
+WARN_FMT   ?= ! %s\n
+ERROR_FMT  ?= x %s\n
 export STATUS_FMT WARN_FMT ERROR_FMT
 
 UNAME_S := $(shell uname -s)
@@ -108,10 +108,10 @@ GH       ?= gh
 toolchain:
 ifneq ($(YEET),)
 	@$(YEET_EXEC) clang -print-prog-name=clang >/dev/null 2>&1 || { \
-		printf '$(STATUS_FMT)' 'Installing' 'yeet toolchain $(TOOLCHAIN_WANT) (none installed yet)' >&2; \
+		printf '$(STATUS_FMT)' 'install' 'yeet toolchain $(TOOLCHAIN_WANT) (none installed yet)' >&2; \
 		$(YEET) toolchain install $(TOOLCHAIN_WANT) --default; }
 	@d="$$($(YEET_EXEC) clang -print-prog-name=clang)"; d="$${d%/*}"; v="$${d##*/}"; \
-	printf '$(STATUS_FMT)' 'Toolchain' "yeet $$v ($$d)" >&2; \
+	printf '$(STATUS_FMT)' 'toolchain' "$$v  ~$${d#$$HOME}" >&2; \
 	if [ -n "$(TOOLCHAIN_KEY)" ] && [ "$$v" != "$(TOOLCHAIN_KEY)" ]; then \
 		printf '$(WARN_FMT)' "yeet's default toolchain is $$v but build/toolchain.lock pins $(TOOLCHAIN_KEY) — 'yeet toolchain default $(TOOLCHAIN_KEY)' to match it, or 'make YEET=' to build from the pinned cache" >&2; \
 	fi

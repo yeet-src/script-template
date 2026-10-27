@@ -30,19 +30,17 @@ include build/bpf.mk
 BUILD_START := $(shell date +%s%N 2>/dev/null)
 
 all: bpf bundle
-	@end=$$(date +%s%N 2>/dev/null); t=""; \
-	case "$(BUILD_START)$$end" in \
-		""|*[!0-9]*) ;; \
-		*) t=" in $$(awk "BEGIN { printf \"%.2fs\", ($$end - $(BUILD_START)) / 1e9 }")" ;; \
-	esac; \
-	printf '$(STATUS_FMT)' 'Finished' "build$$t" >&2
+	$(call done,$(notdir $(CURDIR)))
+	$(call artifact,$(BPF_OUT))
+	$(call artifact,dist/index.js)
 
 # Bundle the entry with the vendored esbuild. esbuild honors tsconfig `paths`
 # (so `@/` resolves at bundle time), while `yeet:*` builtins and `*.bpf.o`
-# objects stay external. The bundle is written to dist/index.jsx: the entry
+# objects stay external. The bundle is written to dist/index.js: the entry
 # ladder tries dist/ before src/, so once built, that is what runs — and the
-# generated file stays out of the source tree (dist/ is gitignored).
-# The .jsx extension keeps the bundle eligible for component auto-mount.
+# generated file stays out of the source tree (dist/ is gitignored). Plain
+# .js is fine: JSX is compiled away by esbuild, and src/main.jsx mounts its
+# root component explicitly, so the bundle needs no auto-mount.
 # Compiled BPF objects in bin/ are loaded by path at runtime, never imported,
 # so they are not bundled.
 #
@@ -53,11 +51,10 @@ all: bpf bundle
 ESBUILD_FLAGS := --bundle --format=esm --platform=neutral \
 	--main-fields=module,main --conditions=import,module \
 	--define:import.meta.main=false \
-	--outfile=dist/index.jsx --jsx=automatic --jsx-import-source=yeet:tui
+	--outfile=dist/index.js --jsx=automatic --jsx-import-source=yeet:tui
 
 bundle: | toolchain
-	$(Q)$(ESBUILD) src/main.jsx $(ESBUILD_FLAGS) --log-level=warning '--external:yeet:*' '--external:*.bpf.o'
-	@printf '$(STATUS_FMT)' 'Bundling' "src/main.jsx -> dist/index.jsx ($$(wc -c < dist/index.jsx | awk '{ printf "%.1fkb", $$1 / 1024 }'))" >&2
+	$(call step,bundle,dist/index.js,$(ESBUILD) src/main.jsx $(ESBUILD_FLAGS) --log-level=warning '--external:yeet:*' '--external:*.bpf.o')
 
 # Post-generation finalize: initialize a git repository with the vendored git
 # (fetched via `vendored-git`). Idempotent — skipped if this is already a repo.
@@ -66,16 +63,17 @@ bundle: | toolchain
 postgen: | vendored-git
 	@g="$(GIT)"; $$g --version >/dev/null 2>&1 || g="$$(command -v git 2>/dev/null || true)"; \
 	if [ -e .git ]; then \
-		printf '$(STATUS_FMT)' 'Skipping' 'git init (already a repository)' >&2; \
+		printf '$(STATUS_FMT)' 'git' 'already a repository' >&2; \
 	elif [ -n "$$g" ]; then \
-		printf '$(STATUS_FMT)' 'Initializing' 'git repository' >&2; \
+		printf '$(STATUS_FMT)' 'git' 'initialized repository' >&2; \
 		$$g -c init.templateDir= init -q . || printf '$(WARN_FMT)' 'git init failed' >&2; \
 	else \
 		printf '$(WARN_FMT)' 'no git available (vendored or host); skipping git init' >&2; \
 	fi
 
 clean: clean-bpf
-	$(call status,Cleaning,node_modules dist)
+	$(call status,clean,node_modules)
+	$(call status,clean,dist)
 	$(Q)rm -rf node_modules dist
 
 .PHONY: all bundle clean postgen

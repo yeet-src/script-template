@@ -47,28 +47,29 @@ bpf: $(BPF_OUT)
 # the cache before any rule shells out to them, without forcing rebuilds.
 $(VMLINUX): | toolchain
 	@command -v $(firstword $(BPFTOOL)) >/dev/null 2>&1 || { $(call fail,bpftool not found — install bpftool / linux-tools); }
-	$(call status,Generating,$@)
-	$(Q)sh build/gen-vmlinux.sh "$(BPFTOOL)" $@
+	$(call step,vmlinux.h,$@,sh build/gen-vmlinux.sh "$(BPFTOOL)" $@)
 
 # Compile each unit to an intermediate object.
 .build/bpf/%.bpf.o: src/bpf/%.bpf.c $(VMLINUX) | toolchain
 	@command -v $(firstword $(CLANG)) >/dev/null 2>&1 || { $(call fail,clang not found — install clang); }
-	$(call status,Compiling,$(notdir $<))
 	$(Q)mkdir -p $(dir $@)
-	$(Q)$(CLANG) $(BPF_CFLAGS) -c $< -o $@
+	$(call step,$(basename $(basename $(notdir $<))),$@,$(CLANG) $(BPF_CFLAGS) -c $< -o $@)
 
 # Statically link every unit into the single loadable object.
 $(BPF_OUT): $(BPF_OBJS) | bin toolchain
 	@command -v $(firstword $(BPFTOOL)) >/dev/null 2>&1 || { $(call fail,bpftool not found — install bpftool / linux-tools); }
-	$(call status,Linking,$@)
-	$(Q)$(BPFTOOL) gen object $@ $(BPF_OBJS)
+	$(call step,link,$@,$(BPFTOOL) gen object $@ $(BPF_OBJS))
 
 bin:
-	mkdir -p bin
+	$(Q)mkdir -p bin
 
+# bin/ is a build product: it holds the linked object (and whatever the kernel
+# matrix stages beside it), is not tracked, and the `bin` rule recreates it.
 clean-bpf:
-	$(call status,Cleaning,$(BPF_OUT) .build $(VMLINUX))
-	$(Q)rm -rf $(BPF_OUT) .build $(VMLINUX)
+	$(call status,clean,bin)
+	$(call status,clean,.build)
+	$(call status,clean,$(VMLINUX))
+	$(Q)rm -rf bin .build $(VMLINUX)
 
 # Load the linked object with veristat to confirm THIS kernel's verifier
 # accepts every program, and to see per-program complexity (insns/states) — a
@@ -79,8 +80,7 @@ clean-bpf:
 .PHONY: veristat
 veristat: $(BPF_OUT) | toolchain
 	@command -v $(firstword $(VERISTAT)) >/dev/null 2>&1 || { $(call fail,veristat not found ($(VERISTAT)) — bump build/toolchain.lock to a toolchain that ships veristat, or install veristat on PATH); }
-	$(call status,Verifying,$(BPF_OUT))
-	$(Q)$(VERISTAT) $(BPF_OUT)
+	$(call step,verify,$(BPF_OUT),$(VERISTAT) $(BPF_OUT))
 
 # Run the same verifier check across a matrix of kernels locally (Linux + KVM),
 # the local counterpart to .github/workflows/kernel-matrix.yml. Boots
@@ -88,7 +88,7 @@ veristat: $(BPF_OUT) | toolchain
 # KERNELS="6.6-main bpf-next-main" or rely on the script's default spread.
 .PHONY: veristat-matrix
 veristat-matrix: $(BPF_OUT) | toolchain
-	$(call status,Verifying,$(BPF_OUT) across kernels)
+	$(call status,verify,$(BPF_OUT) across kernels)
 	$(Q)VERISTAT="$(VERISTAT)" TOOLCHAIN_DIR="$(TOOLCHAIN_DIR)" sh build/kernel-matrix.sh $(KERNELS)
 
 # Write a local .clangd so the editor resolves vmlinux.h, the libbpf SDK
@@ -111,6 +111,6 @@ clangd:
 	  '    - -D__TARGET_ARCH_$(ARCH)' \
 	  '    - -D__BPF_TRACING__' \
 	  > .clangd
-	$(call status,Writing,.clangd (libbpf headers: $(if $(BPF_SYSINCLUDE),$(BPF_SYSINCLUDE),<host include path>)))
+	$(call status,clangd,.clangd (libbpf headers: $(if $(BPF_SYSINCLUDE),$(BPF_SYSINCLUDE),<host include path>)))
 
 .PHONY: bpf clean-bpf
