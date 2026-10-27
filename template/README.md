@@ -64,7 +64,7 @@ the `@/` alias; `main.jsx` wires them together and owns input.
 
 ```sh
 make           # compile BPF (clang + bpftool) + bundle JS (esbuild)
-make QUIET=1   # same, quiet: status lines only, no echoed commands
+make V=1       # same, showing every command behind the status lines
 yeet run .     # runs the bundled dist/index.jsx (needs root for BPF)
 ```
 

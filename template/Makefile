@@ -7,7 +7,7 @@
 #   make postgen — finalize a freshly generated project (git init)
 #   make clangd  — write a local .clangd pointing at the resolved toolchain
 #   make clean   — remove build artifacts
-#   make QUIET=1 — quiet: status lines only, no echoed commands
+#   make V=1     — show the commands behind the status lines
 #
 # This is the build *frontend*: it orchestrates two independent
 # compilers — clang for the BPF objects, esbuild for the JS bundle.
@@ -56,8 +56,8 @@ ESBUILD_FLAGS := --bundle --format=esm --platform=neutral \
 	--outfile=dist/index.jsx --jsx=automatic --jsx-import-source=yeet:tui
 
 bundle: | toolchain
-	$(call status,Bundling,src/main.jsx)
 	$(Q)$(ESBUILD) src/main.jsx $(ESBUILD_FLAGS) --log-level=warning '--external:yeet:*' '--external:*.bpf.o'
+	@printf '$(STATUS_FMT)' 'Bundling' "src/main.jsx -> dist/index.jsx ($$(wc -c < dist/index.jsx | awk '{ printf "%.1fkb", $$1 / 1024 }'))" >&2
 
 # Post-generation finalize: initialize a git repository with the vendored git
 # (fetched via `vendored-git`). Idempotent — skipped if this is already a repo.
