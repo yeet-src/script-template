@@ -29,6 +29,29 @@ struct {
 	__type(value, __u64);
 } runq_hist SEC(".maps");
 
+// floor(log2(v)) without a loop: a 6-step binary search on the bit width.
+// Branch-free and a fixed instruction count, so the verifier has nothing to
+// bound — the obvious `while (v >>= 1) slot++` needs `#pragma unroll`, and
+// clang (22+) refuses to unroll a loop with an early exit. log2(0) == 0.
+static __always_inline __u32 log2u(__u32 v)
+{
+	__u32 shift, r;
+
+	r = (v > 0xFFFF) << 4; v >>= r;
+	shift = (v > 0xFF) << 3; v >>= shift; r |= shift;
+	shift = (v > 0xF) << 2; v >>= shift; r |= shift;
+	shift = (v > 0x3) << 1; v >>= shift; r |= shift;
+	r |= (v >> 1);
+	return r;
+}
+
+static __always_inline __u32 log2l(__u64 v)
+{
+	__u32 hi = v >> 32;
+
+	return hi ? log2u(hi) + 32 : log2u((__u32)v);
+}
+
 static __always_inline void mark_runnable(__u32 pid)
 {
 	__u64 ts = bpf_ktime_get_ns();
@@ -60,17 +83,8 @@ int on_switch_lat(struct trace_event_raw_sched_switch *ctx)
 	__u64 delta = bpf_ktime_get_ns() - *tsp;
 	bpf_map_delete_elem(&runq_start, &pid);
 
-	// slot = floor(log2(delta_ns))
-	__u32 slot = 0;
-	__u64 d = delta;
-#pragma unroll
-	for (int i = 0; i < MAX_SLOTS; i++) {
-		if (d <= 1) {
-			break;
-		}
-		d >>= 1;
-		slot++;
-	}
+	// slot = floor(log2(delta_ns)), clamped to the last bucket
+	__u32 slot = log2l(delta);
 	if (slot >= MAX_SLOTS) {
 		slot = MAX_SLOTS - 1;
 	}

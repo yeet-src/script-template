@@ -9,7 +9,7 @@
 # toolchain.lock) so a generated project stays self-contained. `sync-toolchain`
 # refreshes both from a tag.
 TOOLCHAIN_REPO ?= git@github.com:yeet-src/toolchain.git
-TOOLCHAIN_TAG  ?= v0.1
+TOOLCHAIN_TAG  ?= v0.10.1
 
 new:
 	@scripts/new "$(DEST)" $(NAME)
