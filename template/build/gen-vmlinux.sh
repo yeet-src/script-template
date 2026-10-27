@@ -15,5 +15,14 @@ if [ ! -r /sys/kernel/btf/vmlinux ]; then
 fi
 
 mkdir -p "$(dirname "$OUT")"
-"$BPFTOOL" btf dump file /sys/kernel/btf/vmlinux format c >"$OUT"
+# Mark the generated header as a system header so clang keeps -Wall quiet
+# about it. The dump is not warning-clean: the kernel builds with tagged
+# anonymous members (`struct foo;` as an unnamed struct/union member), which
+# bpftool emits verbatim and clang >= 22 flags with -Wmissing-declarations.
+# Nothing in it is ours to fix, and the pragma only affects diagnostics —
+# CO-RE relocations and preserve_access_index are untouched.
+{
+	echo "#pragma clang system_header"
+	"$BPFTOOL" btf dump file /sys/kernel/btf/vmlinux format c
+} >"$OUT"
 echo "generated $OUT"
