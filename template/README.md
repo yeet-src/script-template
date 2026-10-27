@@ -64,6 +64,7 @@ the `@/` alias; `main.jsx` wires them together and owns input.
 
 ```sh
 make           # compile BPF (clang + bpftool) + bundle JS (esbuild)
+make QUIET=1   # same, quiet: status lines only, no echoed commands
 yeet run .     # runs the bundled dist/index.jsx (needs root for BPF)
 ```
 
@@ -143,6 +144,16 @@ feed the components from any source that exposes the same signals.
 
 - `clang` and `bpftool` (for the BPF leg; `bpftool` generates
   `src/bpf/include/vmlinux.h` from the host kernel, which needs `CONFIG_DEBUG_INFO_BTF`)
+
+Both come from the static toolchain, resolved by `build/toolchain.mk`. With
+the `yeet` CLI on PATH the build runs them as `yeet toolchain exec <tool>`
+from the toolchain `yeet toolchain default` points at — one install shared
+with the CLI, kept current with `yeet toolchain update`. If none is installed
+yet, the first `make` installs the pinned version. Without `yeet`, the build
+fetches the version pinned in `build/toolchain.lock` into a per-machine cache
+(`~/.cache/yeet/toolchain/`) once; `make YEET=` forces that path even when
+`yeet` is installed. `make clangd` writes a `.clangd` pointing at whichever
+one resolved.
 
 No node/npm is required: esbuild is vendored by the toolchain, and the starter
 has no third-party deps. (You only need a package manager if you add npm/jsr
