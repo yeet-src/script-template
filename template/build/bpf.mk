@@ -10,9 +10,11 @@
 # To add another independent object, give it its own link target alongside
 # bin/probe.bpf.o below — there is intentionally no per-object magic here.
 
-# CLANG/BPFTOOL are normally resolved by build/toolchain.mk (vendored static
-# toolchain or shared cache), included before this file. These are the last
-# resort when neither is available: whatever is on PATH. bpftool frequently
+# CLANG/BPFTOOL are normally resolved by build/toolchain.mk (the yeet CLI's
+# toolchain via `yeet toolchain exec`, or the lock-pinned shared cache),
+# included before this file. These are the last resort when neither is
+# available: whatever is on PATH. A resolved tool may be a multi-word command,
+# so the existence checks below probe its first word. bpftool frequently
 # lives in /usr/sbin, which isn't always on a non-root user's PATH; fall back
 # to it before giving up.
 CLANG   ?= clang
@@ -44,25 +46,29 @@ bpf: $(BPF_OUT)
 # `| toolchain` (order-only) ensures the vendored clang/bpftool are present in
 # the cache before any rule shells out to them, without forcing rebuilds.
 $(VMLINUX): | toolchain
-	@command -v $(BPFTOOL) >/dev/null 2>&1 || { echo "error: bpftool not found — install bpftool / linux-tools"; exit 1; }
-	sh build/gen-vmlinux.sh $(BPFTOOL) $@
+	@command -v $(firstword $(BPFTOOL)) >/dev/null 2>&1 || { $(call fail,bpftool not found — install bpftool / linux-tools); }
+	$(call status,Generating,$@)
+	$(Q)sh build/gen-vmlinux.sh "$(BPFTOOL)" $@
 
 # Compile each unit to an intermediate object.
 .build/bpf/%.bpf.o: src/bpf/%.bpf.c $(VMLINUX) | toolchain
-	@command -v $(CLANG) >/dev/null 2>&1 || { echo "error: clang not found — install clang"; exit 1; }
-	@mkdir -p $(dir $@)
-	$(CLANG) $(BPF_CFLAGS) -c $< -o $@
+	@command -v $(firstword $(CLANG)) >/dev/null 2>&1 || { $(call fail,clang not found — install clang); }
+	$(call status,Compiling,$(notdir $<))
+	$(Q)mkdir -p $(dir $@)
+	$(Q)$(CLANG) $(BPF_CFLAGS) -c $< -o $@
 
 # Statically link every unit into the single loadable object.
 $(BPF_OUT): $(BPF_OBJS) | bin toolchain
-	@command -v $(BPFTOOL) >/dev/null 2>&1 || { echo "error: bpftool not found — install bpftool / linux-tools"; exit 1; }
-	$(BPFTOOL) gen object $@ $(BPF_OBJS)
+	@command -v $(firstword $(BPFTOOL)) >/dev/null 2>&1 || { $(call fail,bpftool not found — install bpftool / linux-tools); }
+	$(call status,Linking,$@)
+	$(Q)$(BPFTOOL) gen object $@ $(BPF_OBJS)
 
 bin:
 	mkdir -p bin
 
 clean-bpf:
-	rm -rf $(BPF_OUT) .build $(VMLINUX)
+	$(call status,Cleaning,$(BPF_OUT) .build $(VMLINUX))
+	$(Q)rm -rf $(BPF_OUT) .build $(VMLINUX)
 
 # Load the linked object with veristat to confirm THIS kernel's verifier
 # accepts every program, and to see per-program complexity (insns/states) — a
@@ -72,8 +78,9 @@ clean-bpf:
 # static binary, or `veristat` on PATH).
 .PHONY: veristat
 veristat: $(BPF_OUT) | toolchain
-	@command -v $(VERISTAT) >/dev/null 2>&1 || { echo "error: veristat not found ($(VERISTAT)) — bump build/toolchain.lock to a toolchain that ships veristat, or install veristat on PATH"; exit 1; }
-	$(VERISTAT) $(BPF_OUT)
+	@command -v $(firstword $(VERISTAT)) >/dev/null 2>&1 || { $(call fail,veristat not found ($(VERISTAT)) — bump build/toolchain.lock to a toolchain that ships veristat, or install veristat on PATH); }
+	$(call status,Verifying,$(BPF_OUT))
+	$(Q)$(VERISTAT) $(BPF_OUT)
 
 # Run the same verifier check across a matrix of kernels locally (Linux + KVM),
 # the local counterpart to .github/workflows/kernel-matrix.yml. Boots
@@ -81,12 +88,13 @@ veristat: $(BPF_OUT) | toolchain
 # KERNELS="6.6-main bpf-next-main" or rely on the script's default spread.
 .PHONY: veristat-matrix
 veristat-matrix: $(BPF_OUT) | toolchain
-	VERISTAT="$(VERISTAT)" sh build/kernel-matrix.sh $(KERNELS)
+	$(call status,Verifying,$(BPF_OUT) across kernels)
+	$(Q)VERISTAT="$(VERISTAT)" TOOLCHAIN_DIR="$(TOOLCHAIN_DIR)" sh build/kernel-matrix.sh $(KERNELS)
 
 # Write a local .clangd so the editor resolves vmlinux.h, the libbpf SDK
 # headers and __u* types using the *resolved* toolchain include path — unlike
 # the committed .clangd (which only covers in-repo editing), this picks up the
-# shared-cache path in a scaffolded project. Run after `make` so vmlinux.h
+# yeet toolchain or shared-cache path in a scaffolded project. Run after `make` so vmlinux.h
 # exists. The result can hold a machine-specific cache path, so leave it
 # untracked. Falls back to host headers when no vendored toolchain is found.
 .PHONY: clangd
@@ -103,6 +111,6 @@ clangd:
 	  '    - -D__TARGET_ARCH_$(ARCH)' \
 	  '    - -D__BPF_TRACING__' \
 	  > .clangd
-	@echo "wrote .clangd (libbpf headers: $(if $(BPF_SYSINCLUDE),$(BPF_SYSINCLUDE),<host include path>))"
+	$(call status,Writing,.clangd (libbpf headers: $(if $(BPF_SYSINCLUDE),$(BPF_SYSINCLUDE),<host include path>)))
 
 .PHONY: bpf clean-bpf

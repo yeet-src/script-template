@@ -7,6 +7,7 @@
 #   make postgen — finalize a freshly generated project (git init)
 #   make clangd  — write a local .clangd pointing at the resolved toolchain
 #   make clean   — remove build artifacts
+#   make QUIET=1 — quiet: status lines only, no echoed commands
 #
 # This is the build *frontend*: it orchestrates two independent
 # compilers — clang for the BPF objects, esbuild for the JS bundle.
@@ -16,15 +17,25 @@
 # so the default goal must leave the project runnable.
 #
 # clang, bpftool and esbuild come from the static toolchain resolved by
-# build/toolchain.mk (a shared per-machine cache, or binaries vendored in
-# the bootstrap repo) — so the build needs no system C/BPF toolchain.
+# build/toolchain.mk (the yeet CLI's installed toolchain when `yeet` is on
+# PATH, else a shared per-machine cache pinned by build/toolchain.lock) — so
+# the build needs no system C/BPF toolchain.
 
 .DEFAULT_GOAL := all
 
+include build/ui.mk
 include build/toolchain.mk
 include build/bpf.mk
 
+BUILD_START := $(shell date +%s%N 2>/dev/null)
+
 all: bpf bundle
+	@end=$$(date +%s%N 2>/dev/null); t=""; \
+	case "$(BUILD_START)$$end" in \
+		""|*[!0-9]*) ;; \
+		*) t=" in $$(awk "BEGIN { printf \"%.2fs\", ($$end - $(BUILD_START)) / 1e9 }")" ;; \
+	esac; \
+	printf '$(STATUS_FMT)' 'Finished' "build$$t" >&2
 
 # Bundle the entry with the vendored esbuild. esbuild honors tsconfig `paths`
 # (so `@/` resolves at bundle time), while `yeet:*` builtins and `*.bpf.o`
@@ -45,24 +56,26 @@ ESBUILD_FLAGS := --bundle --format=esm --platform=neutral \
 	--outfile=dist/index.jsx --jsx=automatic --jsx-import-source=yeet:tui
 
 bundle: | toolchain
-	$(ESBUILD) src/main.jsx $(ESBUILD_FLAGS) '--external:yeet:*' '--external:*.bpf.o'
+	$(call status,Bundling,src/main.jsx)
+	$(Q)$(ESBUILD) src/main.jsx $(ESBUILD_FLAGS) --log-level=warning '--external:yeet:*' '--external:*.bpf.o'
 
 # Post-generation finalize: initialize a git repository with the vendored git
 # (fetched via `vendored-git`). Idempotent — skipped if this is already a repo.
 # The scaffolders (`yeet new`, `scripts/new`) run `make postgen` after creating
 # the project, so the CLI itself stays a thin caller of make.
 postgen: | vendored-git
-	@g="$(GIT)"; [ -x "$$g" ] || g="$$(command -v git 2>/dev/null || true)"; \
+	@g="$(GIT)"; $$g --version >/dev/null 2>&1 || g="$$(command -v git 2>/dev/null || true)"; \
 	if [ -e .git ]; then \
-		echo "postgen: already a git repository"; \
+		printf '$(STATUS_FMT)' 'Skipping' 'git init (already a repository)' >&2; \
 	elif [ -n "$$g" ]; then \
-		echo "postgen: git init"; \
-		"$$g" -c init.templateDir= init -q . || echo "warning: 'git init' failed" >&2; \
+		printf '$(STATUS_FMT)' 'Initializing' 'git repository' >&2; \
+		$$g -c init.templateDir= init -q . || printf '$(WARN_FMT)' 'git init failed' >&2; \
 	else \
-		echo "warning: no git available (vendored or host); skipping 'git init'" >&2; \
+		printf '$(WARN_FMT)' 'no git available (vendored or host); skipping git init' >&2; \
 	fi
 
 clean: clean-bpf
-	rm -rf node_modules dist
+	$(call status,Cleaning,node_modules dist)
+	$(Q)rm -rf node_modules dist
 
 .PHONY: all bundle clean postgen

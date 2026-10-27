@@ -42,11 +42,15 @@ need() { command -v "$1" >/dev/null 2>&1 || { echo "error: '$1' not found — $2
 sha256() { if command -v sha256sum >/dev/null 2>&1; then sha256sum "$1" | awk '{print $1}'; else shasum -a 256 "$1" | awk '{print $1}'; fi; }
 need ssh "install openssh-client"
 
-# --- resolve qemu: prefer the vendored static qemu from the toolchain release,
-# fall back to a system qemu-system on PATH. lvh finds qemu via PATH and the
-# static qemu finds its firmware blobs relative to its own binary, so we just
-# prepend the extracted bin dir to PATH — no -L plumbing into lvh needed.
-if [ -f build/toolchain.lock ]; then
+# --- resolve qemu: prefer the static qemu inside the yeet-managed toolchain
+# (TOOLCHAIN_DIR, passed by the Makefile), then the vendored one from the
+# toolchain release, then a system qemu-system on PATH. lvh finds qemu via
+# PATH and the static qemu finds its firmware blobs relative to its own
+# binary, so we just prepend the bin dir to PATH — no -L plumbing into lvh.
+if [ -n "${TOOLCHAIN_DIR:-}" ] && [ -x "${TOOLCHAIN_DIR%/}/qemu/bin/$QEMU" ]; then
+	PATH="${TOOLCHAIN_DIR%/}/qemu/bin:$PATH"; export PATH
+	echo ">> using yeet toolchain qemu: ${TOOLCHAIN_DIR%/}/qemu/bin/$QEMU"
+elif [ -f build/toolchain.lock ]; then
 	. ./build/toolchain.lock
 	qsha="$(eval "printf '%s' \"\${QEMU_SHA256_${ARCH}:-}\"")"
 	QDIR="${XDG_CACHE_HOME:-$HOME/.cache}/yeet/toolchain/v${TOOLCHAIN_VERSION}/${ARCH}/qemu"
