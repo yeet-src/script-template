@@ -1,7 +1,7 @@
 name: kernel-matrix
 
 # Build the BPF object once per job, then boot a range of kernels and confirm
-# each one's verifier accepts every program in bin/probe.bpf.o. The check is
+# each one's verifier accepts every program in dist/bin/probe.bpf.o. The check is
 # the vendored static `veristat` (it loads each program and reports a verdict);
 # kernels come from cilium's little-vm-helper (quay.io/lvh-images), booted under
 # QEMU/KVM on the runner. Each job writes a detail table to its step summary and
@@ -66,7 +66,7 @@ jobs:
       - name: Build BPF object + stage veristat
         run: |
           set -euo pipefail
-          # Builds bin/probe.bpf.o with the vendored static toolchain, also
+          # Builds dist/bin/probe.bpf.o with the vendored static toolchain, also
           # populating the per-machine toolchain cache (clang/bpftool/veristat).
           make bpf
 
@@ -82,7 +82,7 @@ jobs:
             exit 1
           fi
           install -Dm755 "$cache/veristat" .kmatrix/veristat
-          file .kmatrix/veristat bin/probe.bpf.o
+          file .kmatrix/veristat dist/bin/probe.bpf.o
 
       - name: Verify on kernel ${{ matrix.kernel }}
         uses: cilium/little-vm-helper@v0.0.30

@@ -3,7 +3,7 @@
 This is a **yeet** script: a reactive JSX TUI that runs in the daemon's V8
 isolate, fed by live kernel data (eBPF + a process/system graph). This file
 is the API contract and gotcha list for editing it. For build/run mechanics,
-layout, and the `@/`/`#/` aliases, see `README.md` — don't duplicate that here.
+layout, and the `#/` import root, see `README.md` — don't duplicate that here.
 
 ## Mental model
 
@@ -47,10 +47,11 @@ run until something watches it — there's no UI here):
 
 ```js
 // probes/conns.js
-import { BpfObject, RingBuf } from "yeet:bpf";
+import { RingBuf } from "yeet:bpf";
 import { from } from "yeet:tui";
+import probe from "#/bin/probe.bpf.o";   // a BpfObject for the built object
 
-const ctl = await new BpfObject({ exe: "../bin/probe.bpf.o", base: import.meta.dirname })
+const ctl = await probe
   .bind("events", { kind: "ringbuf", btf_struct: "conn_event" })
   .start();
 const events = new RingBuf(ctl, "events");
@@ -75,9 +76,9 @@ if (import.meta.main) {
 }
 ```
 
-Run it directly — `yeet run src/probes/conns.js`. **Caveat:** `@/` and `#/` are
-bundle-time aliases, so a standalone module must reach its siblings by relative
-path (`./probe.js`), or be bundled as its own entry. Switching `JSON.stringify`
+Run it directly — `yeet run src/probes/conns.js`. `#/` imports work here
+too: the runtime resolves them through `imports` in package.json, the same
+way the bundle does at build time. Switching `JSON.stringify`
 to flag BigInt up front saves you the "why does math give NaN" detour — wrap
 64-bit values with `Number(...)` once you've seen them.
 
@@ -89,7 +90,7 @@ hand-fed signal before any real data exists. Mount just the one:
 ```jsx
 // scratch entry while developing components/gauge.jsx
 import { mount, signal } from "yeet:tui";
-import Gauge from "@/components/gauge.jsx";
+import Gauge from "#/components/gauge.jsx";
 
 const fake = signal(0.3);
 setInterval(() => fake.set(Math.random()), 700);   // exercise the reactive path
@@ -252,9 +253,10 @@ restarted.
 **BPF** — bind maps on the shared object, then read them (`yeet:bpf`):
 
 ```js
-import { BpfObject, RingBuf, ArrayMap, HashMap, DataSec } from "yeet:bpf";
+import { RingBuf, ArrayMap, HashMap, DataSec } from "yeet:bpf";
+import probe from "#/bin/probe.bpf.o";   // a BpfObject: the loader builds it from the file
 
-const ctl = await new BpfObject({ exe: "../bin/probe.bpf.o", base: import.meta.dirname })
+const ctl = await probe
   .bind("events", { kind: "ringbuf", btf_struct: "sched_event" })
   .bind("probe.data", { kind: "data" })   // .data/.rodata/.bss section
   .bind("runq_hist", { kind: "array" })
@@ -329,8 +331,11 @@ writes atomically. `yeet.exit()` tears the script down.
    combinators (use `face(patch)` when the style is computed at runtime).
 6. **Ring-buffer events are wrapped** under the `btf_struct` name — unwrap with
    `w?.<struct> ?? w`.
-7. **`@/` and `#/` are bundle-time only** — the runtime resolver doesn't know
-   them, which is why the BPF object is located with `import.meta.dirname`.
+7. **`#/` is the only import root: `src/`** — resolved by tsconfig at bundle
+   time and by package.json `imports` at runtime, so every module also runs
+   standalone. `#/bin/` is the one exception, the built-object dir, mapped to
+   `dist/bin/`; write `import probe from "#/bin/probe.bpf.o"`, and the bundle
+   rewrites the prefix to `./bin/` beside itself.
 8. **`console.log` goes to the daemon log, not the screen** (and strips ANSI) —
    render in-pane via the JSX tree or `tty.write`.
 9. **No Node builtins** (`fs`, `net`, …) — only packages that run in bare V8
@@ -421,8 +426,8 @@ export const cpuPct = computed(() => Math.round(cpu.get() * 100));
 ```jsx
 // main.jsx
 import { Box, Text, mount } from "yeet:tui";
-import { cpu } from "@/probes/sysload.js";
-import Gauge from "@/components/gauge.jsx";
+import { cpu } from "#/probes/sysload.js";
+import Gauge from "#/components/gauge.jsx";
 
 tty.on("keydown", (e) => {
   if (e.code === "Escape" || (e.key ?? "").toLowerCase() === "q") yeet.exit();
@@ -449,14 +454,15 @@ renders.
 
 ```js
 // probes/conns.js
-import { BpfObject, RingBuf } from "yeet:bpf";
+import { RingBuf } from "yeet:bpf";
 import { from } from "yeet:tui";
+import probe from "#/bin/probe.bpf.o";
 
 const MAX = 50;
 
 export const conns = from((state) => {
   const rows = [];
-  const ctl = new BpfObject({ exe: "../bin/probe.bpf.o", base: import.meta.dirname })
+  const ctl = probe
     .bind("events", { kind: "ringbuf", btf_struct: "conn_event" });
   const sub = ctl.start().then((c) =>
     new RingBuf(c, "events").subscribe((w) => {
@@ -496,7 +502,7 @@ a signal it reads changes, so it also re-targets cleanly.
 // components/detail.jsx — subscribe only while this panel is visible
 import { Box, Effect, Text, signal } from "yeet:tui";
 import { RingBuf } from "yeet:bpf";
-import { control } from "@/probes/probe.js";
+import { control } from "#/probes/probe.js";
 
 export default function Detail({ pid }) {
   const lines = signal([]);
@@ -533,7 +539,7 @@ patching a global in its `.data` section. 64-bit fields want a `BigInt`.
 // probes/knob.js
 import { DataSec } from "yeet:bpf";
 import { signal } from "yeet:tui";
-import { control } from "@/probes/probe.js";
+import { control } from "#/probes/probe.js";
 
 const knobs = new DataSec(control, "probe.data");
 
@@ -562,7 +568,7 @@ transparently; iteration order is unstable under churn, so collect-then-act.
 // probes/syscount.js — map keyed by comm[16], value is a __u64 counter
 import { HashMap } from "yeet:bpf";
 import { from } from "yeet:tui";
-import { control } from "@/probes/probe.js";
+import { control } from "#/probes/probe.js";
 
 const counts = new HashMap(control, "counts");
 const comm = (u8) => { let s = ""; for (const b of u8) { if (!b) break; s += String.fromCharCode(b); } return s; };
@@ -630,7 +636,7 @@ export const status = signal("starting…");
 
 export const start = async () => {
   try {
-    const ctl = await new BpfObject({ exe: "../bin/probe.bpf.o", base: import.meta.dirname })
+    const ctl = await probe                        // import probe from "#/bin/probe.bpf.o"
       .bind("events", { kind: "ringbuf", btf_struct: "conn_event" })
       .start();
     /* … wire maps … */
@@ -648,8 +654,8 @@ keeps that lifecycle clean:
 ```jsx
 // main.jsx
 import { mount } from "yeet:tui";
-import App from "@/components/app.jsx";
-import Bsod from "@/components/bsod.jsx";
+import App from "#/components/app.jsx";
+import Bsod from "#/components/bsod.jsx";
 
 tty.on("keydown", (e) => {
   if (e.code === "Escape" || (e.key ?? "").toLowerCase() === "q") yeet.exit();

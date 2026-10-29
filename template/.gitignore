@@ -1,10 +1,11 @@
-# build artifacts (the esbuild bundle lands in dist/index.js)
+# build artifacts: dist/ holds the esbuild bundle (index.js) and the linked
+# BPF object (bin/probe.bpf.o); .build/ the per-unit objects
 /node_modules/
 /dist/
 /.build/
+/pkg/
 
-# compiled BPF objects (bin/ exists only once built) + generated CO-RE header
-/bin/
+# generated CO-RE header
 /src/bpf/include/vmlinux.h
 
 # kernel-matrix run output (build/kernel-matrix.sh)
