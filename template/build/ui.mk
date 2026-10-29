@@ -7,12 +7,10 @@
 #   ✔ runqlat    .build/bpf/runqlat.bpf.o
 #   ✔ link       dist/bin/probe.bpf.o
 #   ✔ bundle     dist/index.js
-#   ✔ tarball    pkg/myproject-0.1.0-x86_64.tar.gz
 #   ✔ done       myproject (0.66s)
 #
 #   ==> dist/bin/probe.bpf.o (8.1kb)
 #   ==> dist/index.js (15.5kb)
-#   ==> pkg/myproject-0.1.0-x86_64.tar.gz (9.2kb)
 #
 # Rows go to stderr, so the build's stdout stays clean for piping. While a
 # step runs, its row shows a spinner, then settles into the check. The

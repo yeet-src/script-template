@@ -4,7 +4,7 @@
 #   make bpf     — compile bpf/*.bpf.c into dist/bin/probe.bpf.o only
 #   make veristat — load the built object with veristat (verifier check on this kernel)
 #   make bundle  — bundle the JS entry with esbuild
-#   make tarball — pack dist/ into pkg/<name>-<version>-<arch>.tar.gz, the shippable artifact
+#   make pkg     — pack dist/ into pkg/<name>-<version>.tar.gz, the shippable artifact
 #   make postgen — finalize a freshly generated project (git init)
 #   make clangd  — write a local .clangd pointing at the resolved toolchain
 #   make clean   — remove build artifacts
@@ -34,15 +34,12 @@ BUILD_START := $(shell date +%s%N 2>/dev/null)
 # name); the directory name and 0.0.0 as fallbacks.
 NAME    := $(or $(shell sed -n 's/^  "name": "\(.*\)",$$/\1/p' package.json),$(notdir $(CURDIR)))
 VERSION := $(or $(shell sed -n 's/^  "version": "\(.*\)",$$/\1/p' package.json),0.0.0)
-# The BPF object is compiled for one target arch, so the package is named by
-# it too (UNAME_M from build/toolchain.mk: x86_64 or aarch64).
-TARBALL := pkg/$(NAME)-$(VERSION)-$(UNAME_M).tar.gz
+TARBALL := pkg/$(NAME)-$(VERSION).tar.gz
 
-all: bpf bundle tarball
+all: bpf bundle
 	$(call done,$(NAME))
 	$(call artifact,$(BPF_OUT))
 	$(call artifact,dist/index.js)
-	$(call artifact,$(TARBALL))
 
 # Bundle the entry with the vendored esbuild. esbuild honors tsconfig `paths`
 # (so `#/` resolves at bundle time), while `yeet:*` builtins and `*.bpf.o`
@@ -71,15 +68,15 @@ bundle: | toolchain
 	$(call step,bundle,dist/index.js,$(ESBUILD) src/main.jsx $(ESBUILD_FLAGS) --log-level=warning '--external:yeet:*' '--external:*.bpf.o')
 
 # The shippable artifact: all of dist/ (index.js + bin/) as
-# pkg/<name>-<version>-<arch>.tar.gz. Entries are relative (./index.js,
+# pkg/<name>-<version>.tar.gz. Entries are relative (./index.js,
 # ./bin/probe.bpf.o), so it unpacks into any directory you choose, and
-# `yeet run .` there runs it. pkg/ holds one package per version and arch
-# built; bump "version" in package.json to cut a new one.
-tarball: bpf bundle | pkg
-	$(call step,tarball,$(TARBALL),tar -czf $(TARBALL) -C dist .)
-
-pkg:
-	$(Q)mkdir -p pkg
+# `yeet run .` there runs it. Not part of the default build — `yeet run`
+# needs only dist/ — so it's a separate target. pkg/ holds one package per
+# version built; bump "version" in package.json to cut a new one.
+pkg: bpf bundle
+	$(call step,pkg,$(TARBALL),mkdir -p pkg && tar -czf $(TARBALL) -C dist .)
+	$(call done,$(NAME))
+	$(call artifact,$(TARBALL))
 
 # Post-generation finalize: initialize a git repository with the vendored git
 # (fetched via `vendored-git`). Idempotent — skipped if this is already a repo.
@@ -102,4 +99,4 @@ clean: clean-bpf
 	$(call status,clean,pkg)
 	$(Q)rm -rf node_modules dist pkg
 
-.PHONY: all bundle tarball clean postgen
+.PHONY: all bundle pkg clean postgen
