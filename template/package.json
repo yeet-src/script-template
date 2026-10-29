@@ -3,6 +3,10 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "imports": {
+    "#/bin/*": "./dist/bin/*",
+    "#/*": "./src/*"
+  },
   "description": "__NAME__ — a yeet script.",
   "dependencies": {}
 }

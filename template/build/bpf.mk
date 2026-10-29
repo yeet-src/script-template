@@ -2,13 +2,13 @@
 #
 # The BPF program is modular: each src/bpf/*.bpf.c is a unit, compiled on
 # its own, and all units are statically linked into ONE loadable object,
-# bin/probe.bpf.o, with `bpftool gen object` — the same linker libbpf uses
+# dist/bin/probe.bpf.o, with `bpftool gen object` — the same linker libbpf uses
 # internally. Split the program across as many .bpf.c files as you like;
 # share structs, maps and helpers through headers in src/bpf/include/ and
 # the linker merges the duplicates. vmlinux.h (CO-RE) is generated there.
 #
 # To add another independent object, give it its own link target alongside
-# bin/probe.bpf.o below — there is intentionally no per-object magic here.
+# dist/bin/probe.bpf.o below — there is intentionally no per-object magic here.
 
 # CLANG/BPFTOOL are normally resolved by build/toolchain.mk (the yeet CLI's
 # toolchain via `yeet toolchain exec`, or the lock-pinned shared cache),
@@ -28,12 +28,14 @@ ARCH    := $(ARCH:aarch64=arm64)
 VMLINUX  := src/bpf/include/vmlinux.h
 BPF_SRCS := $(wildcard src/bpf/*.bpf.c)
 # One intermediate object per unit. They live under .build/ so they are
-# never mistaken for the loadable object in bin/.
+# never mistaken for the loadable object in dist/.
 BPF_OBJS := $(patsubst src/bpf/%.bpf.c,.build/bpf/%.bpf.o,$(BPF_SRCS))
-# The single linked object. Its `.bpf.o` suffix is what the JS side loads
-# with `import probe from "../bin/probe.bpf.o"` (the loader's
-# BpfObjectRule matches on that suffix).
-BPF_OUT  := bin/probe.bpf.o
+# The single linked object, written under dist/ so dist/ is the whole
+# deployable. Its `.bpf.o` suffix is what the loader's BpfObjectRule matches
+# on: src/probes/probe.js does `import probe from "#/bin/probe.bpf.o"`.
+# `#/bin/` is the built-object dir — package.json maps it to dist/bin/ in the
+# tree, and esbuild rewrites it to ./bin/ in the bundle (see the Makefile).
+BPF_OUT  := dist/bin/probe.bpf.o
 
 BPF_CFLAGS ?= -g -O2 -Wall -target bpf -D__TARGET_ARCH_$(ARCH) -mcpu=v3 -I src/bpf/include
 # Add the vendored libbpf program headers (<bpf/bpf_helpers.h>, …) when a
@@ -56,20 +58,19 @@ $(VMLINUX): | toolchain
 	$(call step,$(basename $(basename $(notdir $<))),$@,$(CLANG) $(BPF_CFLAGS) -c $< -o $@)
 
 # Statically link every unit into the single loadable object.
-$(BPF_OUT): $(BPF_OBJS) | bin toolchain
+$(BPF_OUT): $(BPF_OBJS) | dist/bin toolchain
 	@command -v $(firstword $(BPFTOOL)) >/dev/null 2>&1 || { $(call fail,bpftool not found — install bpftool / linux-tools); }
 	$(call step,link,$@,$(BPFTOOL) gen object $@ $(BPF_OBJS))
 
-bin:
-	$(Q)mkdir -p bin
+dist/bin:
+	$(Q)mkdir -p dist/bin
 
-# bin/ is a build product: it holds the linked object (and whatever the kernel
-# matrix stages beside it), is not tracked, and the `bin` rule recreates it.
+# Only the BPF side of dist/: the JS bundle beside it belongs to `make clean`.
 clean-bpf:
-	$(call status,clean,bin)
+	$(call status,clean,$(BPF_OUT))
 	$(call status,clean,.build)
 	$(call status,clean,$(VMLINUX))
-	$(Q)rm -rf bin .build $(VMLINUX)
+	$(Q)rm -rf $(BPF_OUT) .build $(VMLINUX)
 
 # Load the linked object with veristat to confirm THIS kernel's verifier
 # accepts every program, and to see per-program complexity (insns/states) — a

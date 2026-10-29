@@ -12,21 +12,21 @@
  *                   re-filters which switches it emits — live.
  *
  * Layout: probes/ (BPF-aware) → components/ (pure UI) → lib/ (pure helpers),
- * imported through the `@/` source alias and composed here.
+ * imported through the `#/` root and composed here.
  *
- * To ship a pure-JS script, delete src/bpf/, bin/, and probes/cpusched.js.
+ * To ship a pure-JS script, delete src/bpf/, probes/probe.js, and probes/cpusched.js.
  */
 import { Box, Text, idx, mount, signal } from "yeet:tui";
-import { numCpus } from "@/probes/probe.js";
-import { cpus, minSlice, procs, setMinSlice } from "@/probes/cpusched.js";
-import { latency } from "@/probes/runqlat.js";
-import { layoutFor } from "@/lib/layout.js";
-import TitleBar from "@/components/titlebar.jsx";
-import Heatmap from "@/components/heatmap.jsx";
-import Procs from "@/components/procs.jsx";
-import Detail from "@/components/detail.jsx";
-import Histogram from "@/components/histogram.jsx";
-import Footer from "@/components/footer.jsx";
+import { numCpus } from "#/probes/probe.js";
+import { cpus, minSlice, procs, setMinSlice } from "#/probes/cpusched.js";
+import { latency } from "#/probes/runqlat.js";
+import { layoutFor } from "#/lib/layout.js";
+import TitleBar from "#/components/titlebar.jsx";
+import Heatmap from "#/components/heatmap.jsx";
+import Procs from "#/components/procs.jsx";
+import Detail from "#/components/detail.jsx";
+import Histogram from "#/components/histogram.jsx";
+import Footer from "#/components/footer.jsx";
 
 const SLICE_STEP = 100; // µs per +/- press
 const HEAT_TOP = 2; // screen row of the first CPU row (title + heatmap header)

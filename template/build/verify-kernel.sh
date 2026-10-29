@@ -5,7 +5,7 @@
 # kernel with cilium's little-vm-helper and mounts the project at /host; the
 # workflow stages the static veristat into .kmatrix/ before booting.
 #
-#   sh build/verify-kernel.sh [bpf-object]   (default: bin/probe.bpf.o)
+#   sh build/verify-kernel.sh [bpf-object]   (default: dist/bin/probe.bpf.o)
 #
 # Set OUT_CSV=<path> to also write a machine-readable result (file,prog,verdict,
 # insns,states) — the workflow points it at the mounted workspace so the runner
@@ -18,7 +18,7 @@
 
 set -eu
 
-OBJ="${1:-bin/probe.bpf.o}"
+OBJ="${1:-dist/bin/probe.bpf.o}"
 VERISTAT="${VERISTAT:-./.kmatrix/veristat}"
 # verdict LAST so the gate below can match it at end-of-line. veristat's CSV
 # header uses each stat's canonical name, so the columns come out as

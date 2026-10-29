@@ -1,9 +1,10 @@
 # Build the yeet script project.
 #
 #   make         — build everything (BPF objects + JS bundle)
-#   make bpf     — compile bpf/*.bpf.c into bin/* only
+#   make bpf     — compile bpf/*.bpf.c into dist/bin/probe.bpf.o only
 #   make veristat — load the built object with veristat (verifier check on this kernel)
 #   make bundle  — bundle the JS entry with esbuild
+#   make tarball — pack dist/ into pkg/<name>-<version>-<arch>.tar.gz, the shippable artifact
 #   make postgen — finalize a freshly generated project (git init)
 #   make clangd  — write a local .clangd pointing at the resolved toolchain
 #   make clean   — remove build artifacts
@@ -12,7 +13,7 @@
 # This is the build *frontend*: it orchestrates two independent
 # compilers — clang for the BPF objects, esbuild for the JS bundle.
 # Neither understands the other; the JS references compiled objects in
-# bin/ only by path, resolved at runtime. `yeet run` invokes `make`
+# dist/ only by path, resolved at runtime. `yeet run` invokes `make`
 # automatically when running this project from a trusted remote source,
 # so the default goal must leave the project runnable.
 #
@@ -29,32 +30,56 @@ include build/bpf.mk
 
 BUILD_START := $(shell date +%s%N 2>/dev/null)
 
-all: bpf bundle
-	$(call done,$(notdir $(CURDIR)))
+# The project name and version, from package.json (the scaffold sets the
+# name); the directory name and 0.0.0 as fallbacks.
+NAME    := $(or $(shell sed -n 's/^  "name": "\(.*\)",$$/\1/p' package.json),$(notdir $(CURDIR)))
+VERSION := $(or $(shell sed -n 's/^  "version": "\(.*\)",$$/\1/p' package.json),0.0.0)
+# The BPF object is compiled for one target arch, so the package is named by
+# it too (UNAME_M from build/toolchain.mk: x86_64 or aarch64).
+TARBALL := pkg/$(NAME)-$(VERSION)-$(UNAME_M).tar.gz
+
+all: bpf bundle tarball
+	$(call done,$(NAME))
 	$(call artifact,$(BPF_OUT))
 	$(call artifact,dist/index.js)
+	$(call artifact,$(TARBALL))
 
 # Bundle the entry with the vendored esbuild. esbuild honors tsconfig `paths`
-# (so `@/` resolves at bundle time), while `yeet:*` builtins and `*.bpf.o`
+# (so `#/` resolves at bundle time), while `yeet:*` builtins and `*.bpf.o`
 # objects stay external. The bundle is written to dist/index.js: the entry
 # ladder tries dist/ before src/, so once built, that is what runs — and the
 # generated file stays out of the source tree (dist/ is gitignored). Plain
 # .js is fine: JSX is compiled away by esbuild, and src/main.jsx mounts its
 # root component explicitly, so the bundle needs no auto-mount.
-# Compiled BPF objects in bin/ are loaded by path at runtime, never imported,
-# so they are not bundled.
+# Compiled BPF objects are imported as "#/bin/<name>.bpf.o" (see
+# src/probes/probe.js) and stay external: the alias rewrites the "#/bin"
+# prefix to ./bin, relative to the bundle, so every object import points
+# beside the bundle and a copied dist/ (index.js + bin/) runs on its own
+# with no manifest. (`\#`: a bare # would start a make comment.)
 #
 # The build needs no npm/node: the starter imports only `yeet:*` builtins and
-# local `@/` modules, which esbuild resolves on its own. If you add third-party
+# local `#/` modules, which esbuild resolves on its own. If you add third-party
 # packages to package.json, install them into node_modules with the package
 # manager of your choice — esbuild inlines whatever it finds there.
 ESBUILD_FLAGS := --bundle --format=esm --platform=neutral \
 	--main-fields=module,main --conditions=import,module \
 	--define:import.meta.main=false \
-	--outfile=dist/index.js --jsx=automatic --jsx-import-source=yeet:tui
+	--outfile=dist/index.js --jsx=automatic --jsx-import-source=yeet:tui \
+	'--alias:\#/bin=./bin'
 
 bundle: | toolchain
 	$(call step,bundle,dist/index.js,$(ESBUILD) src/main.jsx $(ESBUILD_FLAGS) --log-level=warning '--external:yeet:*' '--external:*.bpf.o')
+
+# The shippable artifact: all of dist/ (index.js + bin/) as
+# pkg/<name>-<version>-<arch>.tar.gz. Entries are relative (./index.js,
+# ./bin/probe.bpf.o), so it unpacks into any directory you choose, and
+# `yeet run .` there runs it. pkg/ holds one package per version and arch
+# built; bump "version" in package.json to cut a new one.
+tarball: bpf bundle | pkg
+	$(call step,tarball,$(TARBALL),tar -czf $(TARBALL) -C dist .)
+
+pkg:
+	$(Q)mkdir -p pkg
 
 # Post-generation finalize: initialize a git repository with the vendored git
 # (fetched via `vendored-git`). Idempotent — skipped if this is already a repo.
@@ -74,6 +99,7 @@ postgen: | vendored-git
 clean: clean-bpf
 	$(call status,clean,node_modules)
 	$(call status,clean,dist)
-	$(Q)rm -rf node_modules dist
+	$(call status,clean,pkg)
+	$(Q)rm -rf node_modules dist pkg
 
-.PHONY: all bundle clean postgen
+.PHONY: all bundle tarball clean postgen

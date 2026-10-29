@@ -5,12 +5,14 @@
 #   ✔ vmlinux.h  src/bpf/include/vmlinux.h
 #   ✔ cpusched   .build/bpf/cpusched.bpf.o
 #   ✔ runqlat    .build/bpf/runqlat.bpf.o
-#   ✔ link       bin/probe.bpf.o
+#   ✔ link       dist/bin/probe.bpf.o
 #   ✔ bundle     dist/index.js
+#   ✔ tarball    pkg/myproject-0.1.0-x86_64.tar.gz
 #   ✔ done       myproject (0.66s)
 #
-#   ==> bin/probe.bpf.o (8.1kb)
+#   ==> dist/bin/probe.bpf.o (8.1kb)
 #   ==> dist/index.js (15.5kb)
+#   ==> pkg/myproject-0.1.0-x86_64.tar.gz (9.2kb)
 #
 # Rows go to stderr, so the build's stdout stays clean for piping. While a
 # step runs, its row shows a spinner, then settles into the check. The
@@ -99,8 +101,8 @@ $(if $(filter 1,$(V)),$(info $(3)))@if [ -n "$(SPIN)" ]; then \
 	done; \
 	wait $$pid; rc=$$?; printf '\r\033[2K' >&2; cat "$$out" >&2; rm -f "$$out"; \
 else ( $(3) ); rc=$$?; fi; \
-if [ $$rc -eq 0 ]; then $(call row,$(STEP_FMT),$(1),$(2)); \
-else $(call row,$(FAIL_FMT),$(1),$(2),failed); exit $$rc; fi
+if [ "$${rc:-1}" -eq 0 ]; then $(call row,$(STEP_FMT),$(1),$(2)); \
+else $(call row,$(FAIL_FMT),$(1),$(2),failed); exit "$${rc:-1}"; fi
 endef
 
 # $(call done,artifact) — the summary row, timed from BUILD_START (set by
